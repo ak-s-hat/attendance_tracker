@@ -52,18 +52,14 @@ async def _startup_health_checks():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load AI models and run health checks at startup."""
-    # Run dependency health checks first (non-fatal)
-    await _startup_health_checks()
+    """Run non-blocking health checks and attach AI pipeline for lazy loading."""
+    app.state.pipeline = pipeline
 
-    # Load AI models
+    # Run dependency health checks (non-fatal, logs status)
     try:
-        pipeline.load_models()
-        app.state.pipeline = pipeline
-        logger.info("✅ AI models loaded")
+        await _startup_health_checks()
     except Exception as e:
-        logger.error("❌ Model load failed: %s", e)
-        app.state.pipeline = pipeline  # still attach even if failed
+        logger.warning("Startup health check warning: %s", e)
 
     yield
 

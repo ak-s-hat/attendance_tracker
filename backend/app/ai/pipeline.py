@@ -24,7 +24,9 @@ class AttendancePipeline:
         self._loaded = False
 
     def load_models(self) -> None:
-        """Load all AI models. Call once at application startup."""
+        """Load all AI models. Call once at application startup or on first frame."""
+        if self._loaded:
+            return
         logger.info("AttendancePipeline: loading models...")
         self.detector.load()
         self._loaded = True
@@ -41,9 +43,7 @@ class AttendancePipeline:
             dict with status, embedding (numpy 512-d or None), bbox, scores
         """
         if not self._loaded:
-            raise RuntimeError(
-                "AttendancePipeline not loaded — call load_models() first"
-            )
+            self.load_models()
 
         t_start = time.perf_counter()
 
