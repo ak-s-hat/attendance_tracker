@@ -195,10 +195,11 @@ export interface UserItem {
  * Sign in user and retrieve JWT access token & user role.
  */
 export async function loginUser(baseUrl: string, payload: LoginRequest): Promise<LoginResponse> {
-  const url = `${baseUrl.replace(/\/$/, '')}/api/auth/login`;
+  const cleanBase = baseUrl.trim().replace(/\/+$/, '');
+  const url = `${cleanBase}/api/auth/login`;
   const response = await axios.post<LoginResponse>(url, payload, {
     headers: { 'Content-Type': 'application/json' },
-    timeout: 8000,
+    timeout: 35000, // 35s timeout to handle cloud container cold starts
   });
   if (response.data?.access_token) {
     setAuthToken(response.data.access_token);

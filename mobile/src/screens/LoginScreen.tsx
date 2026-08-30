@@ -147,10 +147,31 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             disabled={loading}
           >
             {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <ActivityIndicator color="#FFFFFF" size="small" style={{ marginRight: 8 }} />
+                <Text style={styles.buttonText}>Connecting to Server...</Text>
+              </View>
             ) : (
               <Text style={styles.buttonText}>Sign In</Text>
             )}
+          </TouchableOpacity>
+
+          {/* Instant Offline Edge Kiosk Launch */}
+          <TouchableOpacity
+            style={styles.offlineKioskBtn}
+            onPress={() => {
+              if (onLoginSuccess) {
+                onLoginSuccess({
+                  token: 'offline_edge_token',
+                  role: 'employee',
+                  user_id: 'offline_kiosk_operator',
+                  username: 'Edge Kiosk (Offline)',
+                  employee_id: null,
+                });
+              }
+            }}
+          >
+            <Text style={styles.offlineKioskBtnText}>⚡ Launch Offline Edge Kiosk</Text>
           </TouchableOpacity>
 
           {/* Server URL Configuration */}
@@ -169,12 +190,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           {showServerSettings && (
             <View style={styles.serverSection}>
               <Text style={styles.serverLabel}>Backend API URL</Text>
+              <Text style={styles.serverHelpText}>
+                Paste your live Render URL (e.g. https://your-app.onrender.com) or local IP (http://192.168.x.x:8000). Do not use localhost on physical Android.
+              </Text>
               <TextInput
                 testID="server-url-input"
                 style={styles.input}
                 value={serverUrl}
                 onChangeText={setServerUrl}
-                placeholder="http://192.168.x.x:8000 or https://xxxx.ngrok-free.app"
+                placeholder="https://your-app.onrender.com"
                 placeholderTextColor={colors.secondaryText}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -310,6 +334,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     marginBottom: 6,
+  },
+  offlineKioskBtn: {
+    backgroundColor: colors.card,
+    borderColor: colors.primary,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+  offlineKioskBtnText: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  serverHelpText: {
+    color: colors.textMuted,
+    fontSize: 11,
+    marginBottom: 8,
+    lineHeight: 16,
   },
   saveUrlBtn: {
     backgroundColor: colors.success,
