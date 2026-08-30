@@ -10,6 +10,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import Constants from 'expo-constants';
 import { loginUser } from '../services/api';
 import { colors } from '../theme/colors';
 
@@ -25,8 +26,12 @@ export interface LoginScreenProps {
   onServerUrlChange?: (url: string) => void;
 }
 
+const DEFAULT_SERVER_URL =
+  Constants.expoConfig?.extra?.apiBaseUrl ||
+  'https://attendance-tracker-backend-yfoc.onrender.com';
+
 export const LoginScreen: React.FC<LoginScreenProps> = ({
-  apiBaseUrl = 'http://192.168.2.118:8000',
+  apiBaseUrl = DEFAULT_SERVER_URL,
   onLoginSuccess,
   onServerUrlChange,
 }) => {
@@ -35,7 +40,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showServerSettings, setShowServerSettings] = useState(false);
-  const [serverUrl, setServerUrl] = useState(apiBaseUrl);
+  const [serverUrl, setServerUrl] = useState(apiBaseUrl || DEFAULT_SERVER_URL);
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) {

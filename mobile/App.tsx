@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import Constants from 'expo-constants';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { KioskScreen } from './src/screens/KioskScreen';
 import { ManagerDashboardScreen } from './src/screens/ManagerDashboardScreen';
@@ -21,10 +22,14 @@ export interface AppProps {
   initialMode?: AppMode;
 }
 
+const DEFAULT_API_URL =
+  Constants.expoConfig?.extra?.apiBaseUrl ||
+  'https://attendance-tracker-backend-yfoc.onrender.com';
+
 export default function App({ initialSession = null, initialMode = 'KIOSK' }: AppProps = {}) {
   const [session, setSession] = useState<UserAuthSession | null>(initialSession);
   const [mode, setMode] = useState<AppMode>(initialMode);
-  const [apiBaseUrl, setApiBaseUrl] = useState('http://192.168.2.118:8000');
+  const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_API_URL);
 
   const handleLoginSuccess = (authData: UserAuthSession) => {
     setSession(authData);
