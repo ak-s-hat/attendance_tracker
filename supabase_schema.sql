@@ -47,9 +47,10 @@ CREATE INDEX IF NOT EXISTS idx_attendance_logs_status ON attendance_logs(status)
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username VARCHAR(100) UNIQUE NOT NULL,
-    hashed_password VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(20) NOT NULL DEFAULT 'employee',
     employee_id UUID REFERENCES employees(id) ON DELETE SET NULL,
+    is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -96,8 +97,8 @@ WHERE NOT EXISTS (SELECT 1 FROM system_settings);
 
 -- 9. Seed Default SuperAdmin Account (username: admin, password: password123)
 -- bcrypt hash for 'password123': $2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW
-INSERT INTO users (username, hashed_password, role)
-SELECT 'admin', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'super_admin'
+INSERT INTO users (username, password_hash, role, is_active)
+SELECT 'admin', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'super_admin', true
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin');
 
 -- Verification query
