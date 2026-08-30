@@ -6,7 +6,16 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
-engine = create_async_engine(settings.DATABASE_URL, echo=False, poolclass=NullPool)
+def _get_async_db_url(url: str) -> str:
+    """Ensure DATABASE_URL uses the asyncpg driver."""
+    clean = url.strip()
+    if clean.startswith("postgres://"):
+        return clean.replace("postgres://", "postgresql+asyncpg://", 1)
+    if clean.startswith("postgresql://") and not clean.startswith("postgresql+asyncpg://"):
+        return clean.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return clean
+
+engine = create_async_engine(_get_async_db_url(settings.DATABASE_URL), echo=False, poolclass=NullPool)
 
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
