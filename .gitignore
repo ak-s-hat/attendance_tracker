@@ -1,0 +1,72 @@
+# Environment variables & Secrets (CRITICAL: Do NOT commit!)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.pfx
+
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+.nox/
+.tox/
+venv/
+.venv/
+env/
+ENV/
+*.sqlite3
+*.db
+
+# Node.js & Frontend / Mobile builds
+node_modules/
+.next/
+.swc/
+.expo/
+out/
+build/
+dist/
+.npm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# AI / ML Model Weights
+*.onnx
+*.pt
+*.pth
+*.h5
+*.bin
+*.tflite
+*.ckpt
+*.safetensors
+*.engine
+!models/.gitkeep
+
+# Anti-Spoof Lab & Training outputs
+anti_spoof_lab/runs/
+runs/
+
+# System & IDE files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# Agent / Tool cache
+.agents/

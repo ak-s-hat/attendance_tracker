@@ -1,0 +1,29 @@
+services:
+  # ---------------------------------------------------------------------------
+  # Attendance Tracker FastAPI + InsightFace AI Backend
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: attendance-tracker-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter # or free
+    region: singapore # Closest to India/Asia (lowest latency)
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: DATABASE_URL
+        sync: false # Set to your Supabase PostgreSQL URL: postgresql+asyncpg://postgres.[REF]:[PASSWORD]@aws-0-ap-south-1.pooler.supabase.com:6543/postgres
+      - key: REDIS_URL
+        value: redis://localhost:6379/0 # Optional or Upstash Redis
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: WORK_START_TIME
+        value: "09:00"
+      - key: CONFIDENCE_THRESHOLD
+        value: "0.65"
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: MODELS_DIR
+        value: "/root/.insightface"

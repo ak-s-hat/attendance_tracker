@@ -1,0 +1,167 @@
+version: "3.9"
+
+services:
+  # ============================================================
+  # PostgreSQL — Database with pgvector extension
+  # ============================================================
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: attendance_postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: attendance_db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================
+  # Redis — Duplicate check-in guard + caching
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: attendance_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================
+  # MinIO — Object storage (face images, audit logs)
+  # ============================================================
+  minio:
+    image: minio/minio
+    container_name: attendance_minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ============================================================
+  # Backend — FastAPI + InsightFace + ONNX Runtime
+  # All Python dependencies are inside the container.
+  # ============================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: attendance_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - D:/ML/models:/models:ro
+      - ./models:/models_local:ro
+      - ./.env:/app/.env:ro
+    environment:
+      # Override DATABASE_URL to point to Docker's postgres service
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/attendance_db
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MODELS_DIR=/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ============================================================
+  # Frontend — Next.js 14 (registration portal + dashboard)
+  # ============================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: attendance_frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      # Browser-side API calls — point to nginx reverse proxy on port 80
+      - NEXT_PUBLIC_API_URL=http://localhost/api
+    depends_on:
+      - backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ============================================================
+  # Mobile — React Native (Expo) dev server
+  # All npm deps install inside the container. No local install.
+  # ============================================================
+  mobile:
+    build:
+      context: ./mobile
+      dockerfile: Dockerfile
+    container_name: attendance_mobile
+    ports:
+      - "8081:8081"     # Metro bundler
+      - "19000:19000"   # Expo dev tools
+      - "19001:19001"
+      - "19002:19002"
+    volumes:
+      - ./mobile:/app
+      - /app/node_modules
+    environment:
+      - EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0
+      - REACT_NATIVE_PACKAGER_HOSTNAME=192.168.2.118
+      - API_BASE_URL=http://192.168.2.118:8000
+    tty: true
+    stdin_open: true
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ============================================================
+  # Nginx — Reverse proxy (routes /api → backend, / → frontend)
+  # ============================================================
+  nginx:
+    image: nginx:alpine
+    container_name: attendance_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

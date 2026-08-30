@@ -1,0 +1,4 @@
+# ONNX model weights — git-ignored
+# Place your ONNX weight files here:
+#   buffalo_l/          — InsightFace ArcFace + SCRFD detector
+#   minifasnet/         — MiniFASNetV2-SE liveness model

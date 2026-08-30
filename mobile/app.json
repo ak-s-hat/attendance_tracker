@@ -1,0 +1,66 @@
+{
+  "expo": {
+    "name": "Attendance Tracker",
+    "slug": "attendance-tracker-mobile",
+    "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.attendancetracker.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow Attendance Tracker to access your camera for kiosk check-in facial detection."
+      }
+    },
+    "android": {
+      "package": "com.attendancetracker.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#0F172A"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "usesCleartextTraffic": true
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Attendance Tracker to access your camera for kiosk check-in facial detection."
+        }
+      ]
+    ],
+    "web": {
+      "favicon": "./assets/icon.png"
+    },
+    "extra": {
+      "apiBaseUrl": "http://192.168.2.118:8000",
+      "eas": {
+        "projectId": "8f11c6c0-fb25-42a6-92b1-5b384f443eb8"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/8f11c6c0-fb25-42a6-92b1-5b384f443eb8"
+    }
+  }
+}
