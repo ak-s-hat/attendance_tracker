@@ -25,6 +25,7 @@ venv/
 .venv/
 env/
 ENV/
+backend/venv/
 *.sqlite3
 *.db
 
@@ -33,30 +34,45 @@ node_modules/
 .next/
 .swc/
 .expo/
+.eas/
 out/
 build/
 dist/
+*.apk
+*.aab
+*.ipa
 .npm
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# AI / ML Model Weights
-*.onnx
+# AI / ML Server Model Weights (Large ~300MB files stay on host)
+models/*.onnx
+models/buffalo_l/
+models/models/
+models/mobile_quantized/
 *.pt
 *.pth
 *.h5
 *.bin
-*.tflite
 *.ckpt
 *.safetensors
 *.engine
 !models/.gitkeep
 
+# Allow Bundled Mobile Edge AI Quantized Weights (<45MB required for EAS Cloud Build)
+!mobile/assets/models/*.onnx
+!mobile/assets/models/*.tflite
+
 # Anti-Spoof Lab & Training outputs
 anti_spoof_lab/runs/
 runs/
+
+# Docker volumes (if created on host)
+postgres_data/
+redis_data/
+minio_data/
 
 # System & IDE files
 .DS_Store
