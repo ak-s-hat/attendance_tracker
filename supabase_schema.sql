@@ -76,7 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_registration_tokens_token ON registration_tokens(
 
 -- 7. Create System Settings Table (Dynamic HR Rules & Debounce)
 CREATE TABLE IF NOT EXISTS system_settings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id SERIAL PRIMARY KEY,
     rapid_scan_debounce_minutes DOUBLE PRECISION NOT NULL DEFAULT 2.0,
     work_start_time VARCHAR(10) NOT NULL DEFAULT '09:00',
     half_day_cutoff_time VARCHAR(10) NOT NULL DEFAULT '13:00',
@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS system_settings (
 
 -- 8. Seed Default System Settings (if not present)
 INSERT INTO system_settings (
+    id,
     rapid_scan_debounce_minutes,
     work_start_time,
     half_day_cutoff_time,
@@ -96,8 +97,8 @@ INSERT INTO system_settings (
     duplicate_face_threshold,
     auto_deduct_absent_leave
 )
-SELECT 2.0, '09:00', '13:00', '17:00', 0.65, false
-WHERE NOT EXISTS (SELECT 1 FROM system_settings);
+VALUES (1, 2.0, '09:00', '13:00', '17:00', 0.65, false)
+ON CONFLICT (id) DO NOTHING;
 
 -- 9. Seed Default SuperAdmin Account (username: admin, password: password123)
 -- bcrypt hash for 'password123': $2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW

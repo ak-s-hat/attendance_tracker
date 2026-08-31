@@ -72,3 +72,12 @@ async def create_all_tables():
                 "ALTER TABLE attendance_logs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();"
             )
         )
+        await conn.execute(
+            text(
+                "DO $$ BEGIN "
+                "IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='system_settings' AND column_name='id' AND data_type='uuid') THEN "
+                "DROP TABLE system_settings CASCADE; "
+                "END IF; "
+                "END $$;"
+            )
+        )
