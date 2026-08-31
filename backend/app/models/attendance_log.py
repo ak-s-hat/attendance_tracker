@@ -26,8 +26,9 @@ class AttendanceLog(TimestampMixin, Base):
         index=True,
     )
     check_type: Mapped[str] = mapped_column(
-        Enum("CHECK_IN", "CHECK_OUT", name="check_type_enum"),
+        String(20),
         nullable=False,
+        default="CHECK_IN",
     )
     timestamp: Mapped[str] = mapped_column(
         DateTime(timezone=True),
@@ -41,8 +42,9 @@ class AttendanceLog(TimestampMixin, Base):
         String(100), nullable=True
     )
     status: Mapped[str] = mapped_column(
-        Enum("SUCCESS", "FAILED", "UNKNOWN", name="status_enum"),
+        String(20),
         nullable=False,
+        default="SUCCESS",
         server_default="SUCCESS",
     )
     failure_reason: Mapped[Optional[str]] = mapped_column(
