@@ -43,3 +43,13 @@ async def create_all_tables():
                 "ALTER TABLE employees ADD COLUMN IF NOT EXISTS work_start_time VARCHAR(5) DEFAULT '09:00';"
             )
         )
+        await conn.execute(
+            text(
+                "ALTER TABLE employees ADD COLUMN IF NOT EXISTS enrollment_photo_key VARCHAR(500);"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;"
+            )
+        )

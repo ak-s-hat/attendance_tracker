@@ -14,8 +14,10 @@ CREATE TABLE IF NOT EXISTS employees (
     department VARCHAR(100) DEFAULT 'General',
     job_title VARCHAR(100),
     face_embedding VECTOR(512),
+    enrollment_photo_key VARCHAR(500),
     is_active BOOLEAN NOT NULL DEFAULT true,
     leave_balance DOUBLE PRECISION NOT NULL DEFAULT 15.0,
+    work_start_time VARCHAR(5) DEFAULT '09:00',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

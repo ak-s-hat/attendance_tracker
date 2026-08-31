@@ -52,8 +52,16 @@ async def _startup_health_checks():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Run non-blocking health checks and attach AI pipeline for lazy loading."""
+    """Run non-blocking health checks, auto-migrate schema, and attach AI pipeline."""
     app.state.pipeline = pipeline
+
+    # Auto-migrate database tables & columns
+    try:
+        from app.core.database import create_all_tables
+        await create_all_tables()
+        logger.info("✅ Database schema synchronized")
+    except Exception as e:
+        logger.warning("Database schema auto-sync warning: %s", e)
 
     # Run dependency health checks (non-fatal, logs status)
     try:
