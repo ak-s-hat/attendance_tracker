@@ -62,12 +62,13 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 -- 6. Create Registration Tokens Table (Time-limited self-enrollment invites)
 CREATE TABLE IF NOT EXISTS registration_tokens (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    token VARCHAR(64) UNIQUE NOT NULL,
+    token VARCHAR(255) UNIQUE NOT NULL,
     created_by_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     expires_at TIMESTAMPTZ NOT NULL,
-    used BOOLEAN NOT NULL DEFAULT false,
+    is_used BOOLEAN NOT NULL DEFAULT false,
     used_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_registration_tokens_token ON registration_tokens(token);

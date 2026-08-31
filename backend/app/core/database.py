@@ -53,3 +53,17 @@ async def create_all_tables():
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;"
             )
         )
+        await conn.execute(
+            text(
+                "DO $$ BEGIN "
+                "IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='registration_tokens' AND column_name='used') THEN "
+                "ALTER TABLE registration_tokens RENAME COLUMN used TO is_used; "
+                "END IF; "
+                "END $$;"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE registration_tokens ADD COLUMN IF NOT EXISTS is_used BOOLEAN DEFAULT false;"
+            )
+        )
