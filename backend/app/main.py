@@ -50,16 +50,40 @@ async def _startup_health_checks():
         logger.warning("❌ Redis not reachable: %s", e)
 
 
+async def _bootstrap_admin_user():
+    """Ensure default superadmin account exists with verified bcrypt hash."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.user import User
+    from app.core.security import get_password_hash
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as db:
+        stmt = select(User).where(User.username == "admin")
+        res = await db.execute(stmt)
+        user = res.scalar_one_or_none()
+        if not user:
+            new_admin = User(
+                username="admin",
+                password_hash=get_password_hash("password123"),
+                role="super_admin",
+                is_active=True,
+            )
+            db.add(new_admin)
+            await db.commit()
+            logger.info("✅ Created default super_admin account (username: admin, password: password123)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run non-blocking health checks, auto-migrate schema, and attach AI pipeline."""
     app.state.pipeline = pipeline
 
-    # Auto-migrate database tables & columns
+    # Auto-migrate database tables & columns and ensure admin user exists
     try:
         from app.core.database import create_all_tables
         await create_all_tables()
-        logger.info("✅ Database schema synchronized")
+        await _bootstrap_admin_user()
+        logger.info("✅ Database schema & admin account synchronized")
     except Exception as e:
         logger.warning("Database schema auto-sync warning: %s", e)
 
