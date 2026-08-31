@@ -48,13 +48,21 @@ class LivenessChecker:
         self.model_loaded = False
 
         # Resolution order for model file
-        target_path = Path(model_path) if model_path else (MODELS_DIR / "minifasnet_v2_se.onnx")
-        if not target_path.exists():
-            alt_path = MODELS_DIR / "2.7_80x80_MiniFASNetV2.onnx"
-            if alt_path.exists():
-                target_path = alt_path
+        candidates = [
+            Path(model_path) if model_path else None,
+            MODELS_DIR / "minifasnet_v2_se.onnx",
+            MODELS_DIR / "minifasnet_int8.onnx",
+            MODELS_DIR / "2.7_80x80_MiniFASNetV2.onnx",
+            Path(__file__).resolve().parents[2] / "models" / "minifasnet_v2_se.onnx",
+            Path(__file__).resolve().parents[2] / "models" / "minifasnet_int8.onnx",
+        ]
+        target_path = None
+        for cand in candidates:
+            if cand and cand.exists():
+                target_path = cand
+                break
 
-        if target_path.exists():
+        if target_path and target_path.exists():
             try:
                 import onnxruntime as ort
 

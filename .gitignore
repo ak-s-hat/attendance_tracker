@@ -61,9 +61,10 @@ models/mobile_quantized/
 *.engine
 !models/.gitkeep
 
-# Allow Bundled Mobile Edge AI Quantized Weights (<45MB required for EAS Cloud Build)
+# Allow Bundled Mobile & Backend Lightweight Anti-Spoof ONNX Weights
 !mobile/assets/models/*.onnx
 !mobile/assets/models/*.tflite
+!backend/models/*.onnx
 
 # Anti-Spoof Lab & Training outputs
 anti_spoof_lab/runs/

@@ -40,14 +40,15 @@ async def _startup_health_checks():
             "❌ pgvector extension missing — run: CREATE EXTENSION vector | %s", e
         )
 
-    # Redis check
+    # Optional Redis check
     try:
-        r = aioredis.from_url(settings.REDIS_URL)
-        await r.ping()
-        await r.aclose()
-        logger.info("✅ Redis connected")
-    except Exception as e:
-        logger.warning("❌ Redis not reachable: %s", e)
+        if settings.REDIS_URL and "localhost" not in settings.REDIS_URL:
+            r = aioredis.from_url(settings.REDIS_URL)
+            await r.ping()
+            await r.aclose()
+            logger.info("✅ Redis connected")
+    except Exception:
+        pass
 
 
 async def _bootstrap_admin_user():

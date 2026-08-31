@@ -207,13 +207,6 @@ async def checkin(
         check_type=check_type,
     )
 
-    # Update Redis TTL key
-    try:
-        redis = await get_redis()
-        await redis.set(f"last_checkin:{employee.id}", "1", ex=10)
-    except Exception as e:
-        logger.warning("Redis set key failed: %s", e)
-
     res = {
         "success": True,
         "employee_name": employee.name,
