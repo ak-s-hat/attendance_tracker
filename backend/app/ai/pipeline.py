@@ -56,13 +56,17 @@ class AttendancePipeline:
                 "embedding": None,
             }
 
-        # Step 2: liveness (V1 stub — always passes)
+        # Step 2: liveness anti-spoofing check
         liveness = self.liveness.check(image_bytes, detection["bbox"])
         if not liveness["is_live"]:
             return {
                 "status": "failed",
                 "reason": "spoof_detected",
                 "embedding": None,
+                "bbox": detection["bbox"],
+                "det_score": detection["det_score"],
+                "liveness_score": liveness["score"],
+                "latency_ms": round((time.perf_counter() - t_start) * 1000, 1),
             }
 
         # Step 3: get embedding
