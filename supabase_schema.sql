@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS attendance_logs (
     confidence_score DOUBLE PRECISION,
     device_id VARCHAR(100) DEFAULT 'kiosk-01',
     failure_reason VARCHAR(200),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_attendance_logs_timestamp ON attendance_logs(timestamp DESC);

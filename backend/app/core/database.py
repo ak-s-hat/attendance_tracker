@@ -67,3 +67,8 @@ async def create_all_tables():
                 "ALTER TABLE registration_tokens ADD COLUMN IF NOT EXISTS is_used BOOLEAN DEFAULT false;"
             )
         )
+        await conn.execute(
+            text(
+                "ALTER TABLE attendance_logs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();"
+            )
+        )
