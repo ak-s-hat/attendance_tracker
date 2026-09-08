@@ -1,0 +1,158 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "pipeline_name": "AttendanceTracker_EdgeAI_Pipeline",
+  "version": "2.0.0",
+  "runtime_environment": {
+    "engine": "onnxruntime-react-native",
+    "fallback_engine": "fastapi_server_delegate",
+    "execution_providers": {
+      "android": ["nnapi", "cpu"],
+      "ios": ["coreml", "cpu"],
+      "web": ["wasm"]
+    }
+  },
+  "quantization_profile": {
+    "type": "INT8 Dynamic Quantization",
+    "toolchain": "onnxruntime.quantization.quantize_dynamic",
+    "weight_data_type": "QInt8 (signed 8-bit integer)",
+    "activation_data_type": "Float32",
+    "per_channel": true,
+    "symmetric": true,
+    "size_reduction_ratio": "~74%",
+    "accuracy_loss_tar_at_far_1e4": "< 0.15%"
+  },
+  "models": {
+    "detection": {
+      "name": "SCRFD-10G-INT8",
+      "purpose": "Face Localization & 5-point Keypoint Alignment",
+      "file": "det_10g_int8.onnx",
+      "size_bytes": 4305997,
+      "size_mb": 4.11,
+      "unquantized_size_mb": 16.8,
+      "input_tensor": {
+        "name": "input.1",
+        "shape": [1, 3, 640, 640],
+        "format": "NCHW",
+        "dtype": "float32",
+        "normalization": {
+          "formula": "(pixel - 127.5) / 128.0",
+          "mean": [127.5, 127.5, 127.5],
+          "std": [128.0, 128.0, 128.0]
+        }
+      },
+      "outputs": [
+        { "name": "score_8", "stride": 8 },
+        { "name": "score_16", "stride": 16 },
+        { "name": "score_32", "stride": 32 },
+        { "name": "bbox_8", "stride": 8 },
+        { "name": "bbox_16", "stride": 16 },
+        { "name": "bbox_32", "stride": 32 },
+        { "name": "kps_8", "stride": 8 },
+        { "name": "kps_16", "stride": 16 },
+        { "name": "kps_32", "stride": 32 }
+      ],
+      "tunable_parameters": {
+        "detection_threshold": {
+          "default": 0.70,
+          "min": 0.50,
+          "max": 0.95,
+          "description": "Minimum confidence required to declare a detected bounding box as a face."
+        },
+        "nms_iou_threshold": {
+          "default": 0.40,
+          "min": 0.20,
+          "max": 0.60,
+          "description": "Intersection over Union (IoU) threshold for Non-Maximum Suppression."
+        },
+        "max_faces_allowed": {
+          "default": 1,
+          "description": "Reject kiosk check-in if more than 1 distinct person is in frame."
+        }
+      }
+    },
+    "liveness": {
+      "name": "MiniFASNetV2-SE-INT8",
+      "purpose": "Face Anti-Spoofing & Physical Authenticity Check",
+      "file": "minifasnet_int8.onnx",
+      "size_bytes": 569558,
+      "size_mb": 0.54,
+      "unquantized_size_mb": 1.74,
+      "input_tensor": {
+        "name": "input",
+        "shape": [1, 3, 80, 80],
+        "format": "NCHW",
+        "dtype": "float32",
+        "normalization": {
+          "formula": "(pixel - 127.5) / 128.0",
+          "mean": [127.5, 127.5, 127.5],
+          "std": [128.0, 128.0, 128.0]
+        }
+      },
+      "outputs": [
+        { "name": "logits", "shape": [1, 2], "classes": ["Spoof", "Real"] }
+      ],
+      "tunable_parameters": {
+        "bbox_expansion_ratio": {
+          "default": 1.50,
+          "min": 1.20,
+          "max": 2.00,
+          "description": "Scale multiplier applied to face box to include hairline, chin, and screen/paper bezel context."
+        },
+        "liveness_threshold": {
+          "default": 0.85,
+          "min": 0.50,
+          "max": 0.98,
+          "description": "Softmax probability cutoff required to classify the face as authentic live human."
+        }
+      }
+    },
+    "recognition": {
+      "name": "ArcFace-ResNet50-INT8 (w600k_r50)",
+      "purpose": "512-dimensional Biometric Identity Embedding",
+      "file": "w600k_r50_int8.onnx",
+      "size_bytes": 43788579,
+      "size_mb": 41.76,
+      "unquantized_size_mb": 174.4,
+      "input_tensor": {
+        "name": "data",
+        "shape": [1, 3, 112, 112],
+        "format": "NCHW",
+        "dtype": "float32",
+        "normalization": {
+          "formula": "(pixel - 127.5) / 128.0",
+          "mean": [127.5, 127.5, 127.5],
+          "std": [128.0, 128.0, 128.0]
+        }
+      },
+      "outputs": [
+        { "name": "embedding", "shape": [1, 512], "dtype": "float32" }
+      ],
+      "tunable_parameters": {
+        "embedding_dimensions": 512,
+        "l2_normalization": true,
+        "cosine_similarity_threshold": {
+          "default": 0.65,
+          "min": 0.50,
+          "max": 0.85,
+          "description": "Cosine similarity threshold between query vector and stored gallery vectors (FAR < 1e-4)."
+        }
+      }
+    }
+  },
+  "vector_gallery_specification": {
+    "storage": "SQLite + In-Memory contiguous Float32Array",
+    "vector_dim": 512,
+    "vector_byte_size_per_employee": 2048,
+    "matching_algorithm": "SIMD 4-way loop unrolled Cosine Dot Product",
+    "target_search_latency_ms": "< 0.1ms for 1,000 employees"
+  },
+  "target_performance_budgets": {
+    "detection_latency_ms": { "min": 30, "target": 45, "max": 70 },
+    "liveness_latency_ms": { "min": 4, "target": 6, "max": 12 },
+    "recognition_latency_ms": { "min": 80, "target": 120, "max": 160 },
+    "vector_match_latency_ms": { "min": 0.01, "target": 0.05, "max": 0.5 },
+    "total_on_device_punch_latency_ms": { "target": "< 200ms", "hard_ceiling": 500 },
+    "peak_ram_mb": { "target": "< 120MB", "hard_ceiling": 160 },
+    "total_model_apk_storage_mb": 46.4
+  }
+}

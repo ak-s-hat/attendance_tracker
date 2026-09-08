@@ -3,6 +3,8 @@ import { ArcFaceRecognizer } from './recognizer';
 import { MiniFASNetLiveness } from './liveness';
 import { FrameData, PipelineResult } from './types';
 import { postEmbeddingCheckin, postImageCheckin } from '../services/api';
+import { vectorGallery } from './vectorMatcher';
+import { enqueueOfflineScan } from '../database/offlineDb';
 
 export class EdgeAIPipeline {
   private detector: SCRFDDetector | null = null;
@@ -23,7 +25,19 @@ export class EdgeAIPipeline {
   }
 
   public async loadModels(detSession?: any, recSession?: any, liveSession?: any): Promise<void> {
-    this.initialize(detSession, recSession, liveSession);
+    if (detSession !== undefined || recSession !== undefined || liveSession !== undefined) {
+      this.initialize(detSession, recSession, liveSession);
+      return;
+    }
+
+    try {
+      const { loadAllEdgeSessions } = require('../services/onnxEngine');
+      const loaded = await loadAllEdgeSessions();
+      this.initialize(loaded.detSession, loaded.recSession, loaded.liveSession);
+    } catch (err: any) {
+      console.warn('[EdgeAIPipeline] Auto model loading fallback:', err?.message || err);
+      this.initialize(null, null, null);
+    }
   }
 
   public async processFrame(frame: FrameData, overrideApiUrl?: string, deviceId = 'mobile_kiosk_01'): Promise<PipelineResult> {
@@ -95,7 +109,52 @@ export class EdgeAIPipeline {
     const embeddingTensor = await this.recognizer.getEmbedding(frame, detResult.bbox);
     const embeddingArray = Array.from(embeddingTensor);
 
-    // Step 4: Transmit 512-d Embedding to Backend Server
+    // Step 4: Autonomous On-Device Vector Matching via InMemVectorGallery
+    if (vectorGallery.getGallerySize() > 0) {
+      const match = vectorGallery.searchBestMatch(embeddingArray, 0.65);
+      if (match) {
+        // Enqueue punch into local SQLite queue for async cloud sync (zero punch latency)
+        try {
+          await enqueueOfflineScan({
+            id: `scan_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+            employee_id: match.employee.id,
+            employee_name: match.employee.name,
+            check_type: 'CHECK_IN',
+            timestamp,
+            confidence_score: match.similarity,
+            liveness_score: livenessResult.score,
+          });
+        } catch (dbErr) {
+          console.warn('[EdgeAIPipeline] Failed to enqueue offline scan:', dbErr);
+        }
+
+        return {
+          success: true,
+          employee_name: match.employee.name,
+          employee_id: match.employee.id,
+          confidence: match.similarity,
+          check_type: 'CHECK_IN',
+          bbox: detResult.bbox,
+          detScore: detResult.detScore,
+          livenessScore: livenessResult.score,
+          embedding: embeddingArray,
+          timestamp,
+        };
+      } else {
+        return {
+          success: false,
+          reason: 'unknown_face',
+          confidence: 0,
+          bbox: detResult.bbox,
+          detScore: detResult.detScore,
+          livenessScore: livenessResult.score,
+          embedding: embeddingArray,
+          timestamp,
+        };
+      }
+    }
+
+    // Step 4b: Fallback mode if local gallery has not yet been populated
     try {
       const resData = await postEmbeddingCheckin(targetUrl, {
         embedding: embeddingArray,

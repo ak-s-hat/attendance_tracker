@@ -571,3 +571,40 @@ if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Mobile Jest unit tests failed" -Fo
 Set-Location ..
 
 Write-Host "Phase M4_WORKER_FIX complete! Frontend and Mobile test suites verified 100%." -ForegroundColor Green
+
+# ============================================================
+# PHASE M5_EDGE_INFERENCE_FIX — Decoupled Offline Edge Punching & Sync Verification
+# Run from: attendance_tracker\ root directory in PowerShell
+# ============================================================
+Set-Location mobile
+Write-Host "==> Running Mobile Jest unit tests for autonomous edge pipeline & offline matching..." -ForegroundColor Cyan
+npm test
+if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Mobile Jest unit tests failed" -ForegroundColor Red; Set-Location ..; exit 1 }
+Set-Location ..
+
+Write-Host "Phase M5_EDGE_INFERENCE_FIX complete! Autonomous on-device punch & decoupled sync verified." -ForegroundColor Green
+
+# ============================================================
+# PHASE M6_ONNX_EDGE_AND_GITHUB_SYNC — ONNX Engine, Pipeline Spec & GitHub Push
+# Run from: attendance_tracker\ root directory in PowerShell
+# ============================================================
+Set-Location mobile
+Write-Host "==> [1/3] Running Mobile Jest test suite for hardware-aware ONNX engine & spec..." -ForegroundColor Cyan
+npm test
+if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Mobile tests failed" -ForegroundColor Red; Set-Location ..; exit 1 }
+Set-Location ..
+
+Write-Host "==> [2/3] Staging updated Edge AI pipeline, ONNX engine & specifications for Git..." -ForegroundColor Cyan
+git add mobile/src/services/onnxEngine.ts mobile/src/ai/pipeline.ts mobile/src/ai/spec.ts mobile/src/ai/pipeline_spec.json mobile/package.json AI_PIPELINE_SPEC.md run_me.ps1
+git commit -m "feat(edge-ai): implement hardware-aware onnx engine, pipeline spec and offline edge matching"
+
+Write-Host "==> [3/3] Pushing updates to GitHub to sync with Render & Supabase..." -ForegroundColor Cyan
+git push origin main
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Notice: 'git push origin main' returned non-zero (checking current active branch)..." -ForegroundColor Yellow
+    git push
+}
+
+Write-Host "Phase M6_ONNX_EDGE_AND_GITHUB_SYNC complete! Edge AI models, ONNX engine & specs synced." -ForegroundColor Green
+
+

@@ -6,6 +6,7 @@ import { LoginScreen } from './src/screens/LoginScreen';
 import { KioskScreen } from './src/screens/KioskScreen';
 import { ManagerDashboardScreen } from './src/screens/ManagerDashboardScreen';
 import { colors } from './src/theme/colors';
+import { syncEmployeeEmbeddingsDelta } from './src/services/syncService';
 
 export type AppMode = 'KIOSK' | 'ADMIN';
 
@@ -34,6 +35,10 @@ export default function App({ initialSession = null, initialMode = 'KIOSK' }: Ap
   const handleLoginSuccess = (authData: UserAuthSession) => {
     setSession(authData);
     setMode('KIOSK');
+    // Contact server ONCE upon login to get fresh updates from Supabase/PostgreSQL DB
+    syncEmployeeEmbeddingsDelta(apiBaseUrl, authData.token).catch((err) =>
+      console.warn('[App] Post-login employee sync error:', err?.message || err)
+    );
   };
 
   const handleLogout = () => {

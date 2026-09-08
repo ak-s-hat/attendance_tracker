@@ -51,7 +51,7 @@
       "favicon": "./assets/icon.png"
     },
     "extra": {
-      "apiBaseUrl": "http://192.168.2.118:8000",
+      "apiBaseUrl": "https://attendance-tracker-backend-yfoc.onrender.com",
       "eas": {
         "projectId": "8f11c6c0-fb25-42a6-92b1-5b384f443eb8"
       }

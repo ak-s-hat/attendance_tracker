@@ -118,4 +118,43 @@ describe('EdgeAIPipeline Unit Tests', () => {
     expect(result.embedding?.length).toBe(512);
     expect(apiModule.postEmbeddingCheckin).toHaveBeenCalledTimes(1);
   });
+
+  it('should match on-device with vectorGallery and NOT call server checkin when gallery is loaded', async () => {
+    const { vectorGallery } = require('../../src/ai/vectorMatcher');
+    vectorGallery.loadGallery([
+      {
+        id: 'emp_edge_1',
+        name: 'Alice Edge',
+        department: 'AI Lab',
+        embedding: new Array(512).fill(0.1),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+
+    const scoreData = new Float32Array(80 * 80 * 2).fill(0.0);
+    scoreData[0] = 0.95;
+    const bboxData = new Float32Array(80 * 80 * 2 * 4).fill(0.0);
+    bboxData[0] = 1.0; bboxData[1] = 1.0; bboxData[2] = 5.0; bboxData[3] = 5.0;
+
+    mockDetSession.run.mockResolvedValue({
+      score_8: { data: scoreData },
+      bbox_8: { data: bboxData },
+      kps_8: { data: new Float32Array(80 * 80 * 2 * 10).fill(0.0) },
+    });
+
+    const pipeline = new EdgeAIPipeline('http://localhost:8000');
+    pipeline.initialize(mockDetSession, mockRecSession, mockLiveSession);
+
+    const result = await pipeline.processFrame(mockFrame);
+
+    expect(result.success).toBe(true);
+    expect(result.employee_name).toBe('Alice Edge');
+    expect(result.employee_id).toBe('emp_edge_1');
+    expect(result.confidence).toBeGreaterThan(0.9);
+    // Should NOT have made an HTTP call to the server during on-device punch!
+    expect(apiModule.postEmbeddingCheckin).not.toHaveBeenCalled();
+
+    // Reset gallery after test
+    vectorGallery.loadGallery([]);
+  });
 });
