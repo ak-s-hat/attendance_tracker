@@ -45,7 +45,8 @@
         {
           "cameraPermission": "Allow Attendance Tracker to access your camera for kiosk check-in facial detection."
         }
-      ]
+      ],
+      "./plugins/withPackagingOptions"
     ],
     "web": {
       "favicon": "./assets/icon.png"
