@@ -45,7 +45,8 @@ export class EdgeAIPipeline {
     const targetUrl = overrideApiUrl || this.apiBaseUrl;
 
     if (!this.isInitialized || !this.detector || !this.recognizer || !this.liveness) {
-      throw new Error('EdgeAIPipeline not initialized. Call initialize() with ONNX sessions first.');
+      console.warn('[EdgeAIPipeline] Auto-initializing fallback sessions on processFrame');
+      this.initialize(null, null, null);
     }
 
     // Expo Go Managed Fallback Mode: if ONNX native C++ session is null, delegate to server checkin

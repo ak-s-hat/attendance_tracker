@@ -22,13 +22,26 @@ export interface OfflineAttendanceRecord {
 }
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
+let dbInitPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
-  if (!dbInstance) {
-    dbInstance = await SQLite.openDatabaseAsync('attendance_offline.db');
-    await initSchema(dbInstance);
+  if (dbInstance) {
+    return dbInstance;
   }
-  return dbInstance;
+  if (!dbInitPromise) {
+    dbInitPromise = (async () => {
+      try {
+        const db = await SQLite.openDatabaseAsync('attendance_offline.db');
+        await initSchema(db);
+        dbInstance = db;
+        return db;
+      } catch (err) {
+        dbInitPromise = null;
+        throw err;
+      }
+    })();
+  }
+  return dbInitPromise;
 }
 
 async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {

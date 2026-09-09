@@ -15,14 +15,20 @@ export interface LoadedEdgeSessions {
 export async function getLocalModelPath(assetModule: any): Promise<string> {
   const asset = Asset.fromModule(assetModule);
   if (!asset.localUri) {
-    await asset.downloadAsync();
+    // Add 10-second timeout to downloadAsync
+    const downloadPromise = asset.downloadAsync();
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Asset download timed out')), 10000)
+    );
+    await Promise.race([downloadPromise, timeoutPromise]);
   }
   return asset.localUri || asset.uri;
 }
 
 /**
- * Hardware-aware session creator. Probes NPU/GPU accelerator drivers (NNAPI on Android,
- * CoreML on iOS), falling back to optimized CPU vector kernels (ARM NEON) if unavailable.
+ * Hardware-aware session creator. Uses stable optimized CPU vector kernels (ARM NEON)
+ * on Android to prevent NNAPI native driver segfaults across varied hardware/firmware,
+ * while still supporting CoreML on iOS and Web WASM.
  */
 export async function createHardwareAwareSession(modelPathOrUri: string): Promise<{ session: any; provider: string }> {
   if (Platform.OS === 'web') {
@@ -43,22 +49,13 @@ export async function createHardwareAwareSession(modelPathOrUri: string): Promis
     const ortNative = require('onnxruntime-react-native');
 
     if (Platform.OS === 'android') {
-      try {
-        // Attempt 1: Try NNAPI hardware acceleration (Qualcomm Hexagon / MediaTek APU / Google Tensor)
-        const session = await ortNative.InferenceSession.create(modelPathOrUri, {
-          executionProviders: ['nnapi', 'cpu'],
-        });
-        return { session, provider: 'nnapi' };
-      } catch (nnapiErr) {
-        console.log('[ONNXEngine] NNAPI unavailable on this device, falling back to ARM NEON CPU...');
-        const session = await ortNative.InferenceSession.create(modelPathOrUri, {
-          executionProviders: ['cpu'],
-        });
-        return { session, provider: 'cpu' };
-      }
+      // Use CPU (ARM NEON) directly: NNAPI causes vendor driver segfaults on many devices
+      const session = await ortNative.InferenceSession.create(modelPathOrUri, {
+        executionProviders: ['cpu'],
+      });
+      return { session, provider: 'cpu' };
     } else if (Platform.OS === 'ios') {
       try {
-        // Attempt 1: Try Apple Neural Engine (CoreML)
         const session = await ortNative.InferenceSession.create(modelPathOrUri, {
           executionProviders: ['coreml', 'cpu'],
         });
@@ -79,7 +76,7 @@ export async function createHardwareAwareSession(modelPathOrUri: string): Promis
   } catch (nativeErr: any) {
     // Graceful fallback for Expo Go where native C++ libraries cannot be loaded
     console.warn(
-      '[ONNXEngine] Native onnxruntime-react-native module not linked (running in Expo Go). Fallback mode active:',
+      '[ONNXEngine] Native onnxruntime-react-native module not linked. Fallback mode active:',
       nativeErr?.message || nativeErr
     );
     throw new Error('NATIVE_ORT_UNAVAILABLE');
@@ -94,9 +91,15 @@ export async function loadAllEdgeSessions(): Promise<LoadedEdgeSessions> {
   console.log('[ONNXEngine] Initializing Edge AI Inference Sessions with packaged INT8 models...');
 
   try {
-    const detAsset = require('../../assets/models/det_10g_int8.onnx');
-    const recAsset = require('../../assets/models/w600k_r50_int8.onnx');
-    const liveAsset = require('../../assets/models/minifasnet_int8.onnx');
+    let detAsset: any, recAsset: any, liveAsset: any;
+    try {
+      detAsset = require('../../assets/models/det_10g_int8.onnx');
+      recAsset = require('../../assets/models/w600k_r50_int8.onnx');
+      liveAsset = require('../../assets/models/minifasnet_int8.onnx');
+    } catch (reqErr: any) {
+      console.warn('[ONNXEngine] Could not require model assets:', reqErr?.message || reqErr);
+      throw new Error('MODEL_ASSETS_UNAVAILABLE');
+    }
 
     const [detPath, recPath, livePath] = await Promise.all([
       getLocalModelPath(detAsset),
@@ -121,10 +124,10 @@ export async function loadAllEdgeSessions(): Promise<LoadedEdgeSessions> {
       isNativeAccelerated: activeProvider === 'nnapi' || activeProvider === 'coreml',
     };
   } catch (err: any) {
-    if (err?.message === 'NATIVE_ORT_UNAVAILABLE') {
-      console.log('[ONNXEngine] Operating in managed mode (server delegate). Build APK with eas build for native edge speed.');
+    if (err?.message === 'NATIVE_ORT_UNAVAILABLE' || err?.message === 'MODEL_ASSETS_UNAVAILABLE') {
+      console.log('[ONNXEngine] Operating in managed mode (server delegate).');
     } else {
-      console.warn('[ONNXEngine] Error loading edge ONNX models:', err?.message || err);
+      console.warn('[ONNXEngine] Error loading edge ONNX models, falling back to server mode:', err?.message || err);
     }
     return {
       detSession: null,

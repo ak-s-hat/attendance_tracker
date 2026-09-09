@@ -15,12 +15,18 @@ import {
 
 let isSyncing = false;
 let lastGallerySyncIso: string | undefined = undefined;
+let isEdgeSyncInitialized = false;
 
 /**
  * Initializes the edge AI offline database and in-memory vector gallery from local SQLite.
  * Does NOT start an aggressive 30-second polling loop.
  */
 export async function initEdgeSyncService(apiBaseUrl?: string, authToken?: string): Promise<void> {
+  if (isEdgeSyncInitialized) {
+    return;
+  }
+  isEdgeSyncInitialized = true;
+
   // 1. Preload gallery from local SQLite cache (instant, zero network)
   try {
     const localEmps = await getAllCachedEmployees();
@@ -31,12 +37,20 @@ export async function initEdgeSyncService(apiBaseUrl?: string, authToken?: strin
   }
 
   // 2. NetInfo reconnection listener — only flushes pending logs when internet is restored
-  NetInfo.addEventListener((state) => {
-    if (state.isConnected && state.isInternetReachable && apiBaseUrl) {
-      console.log('[EdgeSync] Network restored — background flushing pending logs...');
-      flushPendingAttendanceLogs(apiBaseUrl, authToken).catch(() => {});
-    }
-  });
+  try {
+    NetInfo.addEventListener((state) => {
+      try {
+        if (state && state.isConnected && state.isInternetReachable && apiBaseUrl) {
+          console.log('[EdgeSync] Network restored — background flushing pending logs...');
+          flushPendingAttendanceLogs(apiBaseUrl, authToken).catch(() => {});
+        }
+      } catch (listenerErr) {
+        console.warn('[EdgeSync] NetInfo state check failed:', listenerErr);
+      }
+    });
+  } catch (netInfoErr) {
+    console.warn('[EdgeSync] NetInfo addEventListener failed to attach:', netInfoErr);
+  }
 }
 
 /**

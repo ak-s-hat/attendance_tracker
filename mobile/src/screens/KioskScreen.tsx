@@ -33,8 +33,9 @@ export const KioskScreen: React.FC<KioskScreenProps> = ({
         }
       } catch (err: any) {
         if (isMounted) {
-          console.warn('Failed to load Edge AI ONNX models, falling back to stub pipeline:', err);
+          console.warn('Failed to load Edge AI ONNX models, falling back to server-delegate pipeline:', err);
           const fallbackPipe = new EdgeAIPipeline(apiBaseUrl);
+          fallbackPipe.initialize(null, null, null);
           setPipeline(fallbackPipe);
           setError(null);
           setLoading(false);

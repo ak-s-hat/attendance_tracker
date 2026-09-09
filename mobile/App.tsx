@@ -35,10 +35,12 @@ export default function App({ initialSession = null, initialMode = 'KIOSK' }: Ap
   const handleLoginSuccess = (authData: UserAuthSession) => {
     setSession(authData);
     setMode('KIOSK');
-    // Contact server ONCE upon login to get fresh updates from Supabase/PostgreSQL DB
-    syncEmployeeEmbeddingsDelta(apiBaseUrl, authData.token).catch((err) =>
-      console.warn('[App] Post-login employee sync error:', err?.message || err)
-    );
+    // Defer contact to server by 2s so KioskScreen mounts, SQLite initializes cleanly, and UI renders
+    setTimeout(() => {
+      syncEmployeeEmbeddingsDelta(apiBaseUrl, authData.token).catch((err) =>
+        console.warn('[App] Post-login employee sync error:', err?.message || err)
+      );
+    }, 2000);
   };
 
   const handleLogout = () => {
