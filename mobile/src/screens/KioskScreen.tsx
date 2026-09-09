@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 import { EdgeAIPipeline } from '../ai/pipeline';
 import { CameraKiosk } from '../components/CameraKiosk';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { colors } from '../theme/colors';
 
 export interface KioskScreenProps {
@@ -68,11 +69,13 @@ export const KioskScreen: React.FC<KioskScreenProps> = ({
 
   return (
     <View testID="kiosk-screen" style={styles.container}>
-      <CameraKiosk
-        pipeline={pipeline || undefined}
-        apiBaseUrl={apiBaseUrl}
-        mockPermissionGranted={mockPermissionGranted}
-      />
+      <ErrorBoundary label="CameraKiosk">
+        <CameraKiosk
+          pipeline={pipeline || undefined}
+          apiBaseUrl={apiBaseUrl}
+          mockPermissionGranted={mockPermissionGranted}
+        />
+      </ErrorBoundary>
     </View>
   );
 };
