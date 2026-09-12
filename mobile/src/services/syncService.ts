@@ -17,6 +17,29 @@ let isSyncing = false;
 let lastGallerySyncIso: string | undefined = undefined;
 let isEdgeSyncInitialized = false;
 
+export type SyncEventListener = (stats: { cachedCount: number; pendingSyncCount: number }) => void;
+const syncEventListeners = new Set<SyncEventListener>();
+
+export function subscribeSyncEvents(listener: SyncEventListener): () => void {
+  syncEventListeners.add(listener);
+  // Fire immediately with current stats
+  getOfflineDbStats().then((stats) => {
+    try { listener(stats); } catch (_) {}
+  }).catch(() => {});
+  return () => syncEventListeners.delete(listener);
+}
+
+export async function notifySyncListeners(): Promise<void> {
+  try {
+    const stats = await getOfflineDbStats();
+    syncEventListeners.forEach((fn) => {
+      try { fn(stats); } catch (_) {}
+    });
+  } catch (err) {
+    console.warn('[EdgeSync] notifySyncListeners error:', err);
+  }
+}
+
 /**
  * Initializes the edge AI offline database and in-memory vector gallery from local SQLite.
  * Does NOT start an aggressive 30-second polling loop.
@@ -32,6 +55,7 @@ export async function initEdgeSyncService(apiBaseUrl?: string, authToken?: strin
     const localEmps = await getAllCachedEmployees();
     vectorGallery.loadGallery(localEmps);
     console.log(`[EdgeSync] Preloaded ${vectorGallery.getGallerySize()} employee vectors from local SQLite.`);
+    notifySyncListeners();
   } catch (err) {
     console.warn('[EdgeSync] Failed to preload local gallery:', err);
   }
@@ -153,6 +177,7 @@ export async function flushPendingAttendanceLogs(apiBaseUrl: string, authToken?:
       await markScansAsSynced(syncRes.synced_ids);
       syncedCount = syncRes.synced_ids.length;
       console.log(`[EdgeSync] Background flushed ${syncedCount} offline scans to cloud.`);
+      notifySyncListeners();
     }
   } catch (err: any) {
     console.warn('[EdgeSync] flushPendingAttendanceLogs failed:', err?.message || err);
@@ -173,11 +198,33 @@ export async function syncEmployeeEmbeddingsDelta(apiBaseUrl: string, authToken?
       const updatedLocal = await getAllCachedEmployees();
       vectorGallery.loadGallery(updatedLocal);
       console.log(`[EdgeSync] Synced & updated vector gallery (${vectorGallery.getGallerySize()} employees).`);
+      notifySyncListeners();
       return deltas.length;
     }
+    notifySyncListeners();
     return 0;
   } catch (err: any) {
     console.warn('[EdgeSync] syncEmployeeEmbeddingsDelta failed:', err?.message || err);
     return 0;
   }
+}
+
+/**
+ * Force manual full sync (Pushes pending punches & pulls all employee embeddings from cloud)
+ */
+export async function forceSyncAll(
+  apiBaseUrl: string,
+  authToken?: string
+): Promise<{ pushed: number; pulled: number; cachedTotal: number }> {
+  // Reset sync watermark to pull all registered employees
+  lastGallerySyncIso = undefined;
+  const pushed = await flushPendingAttendanceLogs(apiBaseUrl, authToken);
+  const pulled = await syncEmployeeEmbeddingsDelta(apiBaseUrl, authToken);
+  const stats = await getOfflineDbStats();
+  await notifySyncListeners();
+  return {
+    pushed,
+    pulled,
+    cachedTotal: stats.cachedCount,
+  };
 }

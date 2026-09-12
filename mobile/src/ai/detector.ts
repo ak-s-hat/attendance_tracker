@@ -1,4 +1,5 @@
 import { BoundingBox, DetectionResult, FacialLandmarks, FrameData, Point2D } from './types';
+import { createOrtTensor } from './tensorUtils';
 
 export class SCRFDDetector {
   private session: any = null;
@@ -112,11 +113,7 @@ export class SCRFDDetector {
     const inputName = this.session.inputNames ? this.session.inputNames[0] : 'input.1';
 
     const feeds: Record<string, any> = {};
-    feeds[inputName] = {
-      data: inputTensor,
-      dims: [1, 3, this.inputHeight, this.inputWidth],
-      type: 'float32',
-    };
+    feeds[inputName] = createOrtTensor('float32', inputTensor, [1, 3, this.inputHeight, this.inputWidth]);
 
     const outputs = await this.session.run(feeds);
     

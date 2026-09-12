@@ -134,4 +134,61 @@ describe('CameraKiosk Component Unit Tests', () => {
     expect(resetBadge).toBeTruthy();
     expect(resetBadge.props.children).toEqual(['Resetting in ', 3, 's...']);
   });
+
+  it('renders engine mode pill and diagnostics button that opens diagnostics modal', () => {
+    let tree: any;
+    renderer.act(() => {
+      tree = renderer.create(
+        <CameraKiosk
+          mockPermissionGranted={true}
+          initialStatus="idle"
+        />
+      );
+      trees.push(tree);
+    });
+
+    const root = tree.root;
+    const enginePill = root.findByProps({ testID: 'engine-mode-pill' });
+    expect(enginePill).toBeTruthy();
+
+    const diagBtn = root.findByProps({ testID: 'diagnostics-button' });
+    expect(diagBtn).toBeTruthy();
+
+    renderer.act(() => {
+      diagBtn.props.onPress();
+    });
+
+    const activeMode = root.findByProps({ testID: 'diag-active-mode' });
+    expect(activeMode).toBeTruthy();
+
+    const closeBtn = root.findByProps({ testID: 'close-diagnostics-button' });
+    renderer.act(() => {
+      closeBtn.props.onPress();
+    });
+  });
+
+  it('renders manual sync button in header and diagnostics modal', () => {
+    let tree: any;
+    renderer.act(() => {
+      tree = renderer.create(
+        <CameraKiosk
+          mockPermissionGranted={true}
+          initialStatus="idle"
+        />
+      );
+      trees.push(tree);
+    });
+
+    const root = tree.root;
+    const headerSyncBtn = root.findByProps({ testID: 'manual-sync-button' });
+    expect(headerSyncBtn).toBeTruthy();
+
+    const diagBtn = root.findByProps({ testID: 'diagnostics-button' });
+    renderer.act(() => {
+      diagBtn.props.onPress();
+    });
+
+    const modalSyncBtn = root.findByProps({ testID: 'modal-sync-button' });
+    expect(modalSyncBtn).toBeTruthy();
+  });
 });

@@ -608,3 +608,65 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Phase M6_ONNX_EDGE_AND_GITHUB_SYNC complete! Edge AI models, ONNX engine & specs synced." -ForegroundColor Green
 
 
+# ============================================================
+# PHASE M7_ONNX_CRASH_FIX_AND_EAS_BUILD — Fix ONNX NativeModule Guard, Verify Mobile Tests & Push to GitHub
+# Run from: attendance_tracker\ root directory in PowerShell
+# ============================================================
+Set-Location mobile
+
+Write-Host "==> [1/4] Patching onnxruntime-react-native: removing legacy unimodule.json to enable autolinking..." -ForegroundColor Cyan
+node scripts/patch-ort.js
+
+Write-Host "==> [2/4] Running Mobile Jest test suite including ONNX engine fallback and diagnostics tests..." -ForegroundColor Cyan
+npm test
+if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Mobile tests failed" -ForegroundColor Red; Set-Location ..; exit 1 }
+Set-Location ..
+
+Write-Host "==> [3/4] Staging updated ONNX engine guards, patch script, autolinking plugin, UI diagnostics & test suite..." -ForegroundColor Cyan
+git add mobile/scripts/patch-ort.js mobile/package.json mobile/plugins/withPackagingOptions.js mobile/app.json mobile/src/services/onnxEngine.ts mobile/src/ai/pipeline.ts mobile/src/ai/types.ts mobile/src/components/CameraKiosk.tsx mobile/tests/ai/onnxEngine.test.ts mobile/tests/components/CameraKiosk.test.tsx run_me.ps1
+git commit -m "fix(mobile): patch onnx autolinking via unimodule.json removal and add live AI engine diagnostics UI"
+
+Write-Host "==> [4/4] Pushing fix to GitHub remote..." -ForegroundColor Cyan
+git push origin main
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Notice: 'git push origin main' returned non-zero (checking current active branch)..." -ForegroundColor Yellow
+    git push
+}
+
+Write-Host "Phase M7_ONNX_CRASH_FIX_AND_EAS_BUILD complete! Changes pushed to GitHub." -ForegroundColor Green
+Write-Host ""
+
+# ============================================================
+# PHASE M8_ONNX_FEED_TENSOR_AND_DB_SYNC_FIX — Fix ONNX C++ JSI Tensor Feeds, JPEG Decoding & Live DB Sync
+# Run from: attendance_tracker\ root directory in PowerShell
+# ============================================================
+Set-Location mobile
+
+Write-Host "==> [1/5] Installing jpeg-js pure-JavaScript image decoder..." -ForegroundColor Cyan
+npm install jpeg-js
+if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: npm install jpeg-js failed" -ForegroundColor Red; Set-Location ..; exit 1 }
+
+Write-Host "==> [2/5] Running patch-ort.js..." -ForegroundColor Cyan
+node scripts/patch-ort.js
+
+Write-Host "==> [3/5] Running Mobile Jest test suite (tensorUtils, imageDecoder, CameraKiosk, onnxEngine)..." -ForegroundColor Cyan
+npm test
+if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Mobile Jest tests failed" -ForegroundColor Red; Set-Location ..; exit 1 }
+Set-Location ..
+
+Write-Host "==> [4/5] Staging updated files for Git..." -ForegroundColor Cyan
+git add mobile/package.json mobile/package-lock.json mobile/src/ai/tensorUtils.ts mobile/src/ai/detector.ts mobile/src/ai/recognizer.ts mobile/src/ai/liveness.ts mobile/src/ai/pipeline.ts mobile/src/ai/types.ts mobile/src/services/imageDecoder.ts mobile/src/services/syncService.ts mobile/src/components/CameraKiosk.tsx mobile/tests/ai/tensorUtils.test.ts mobile/tests/services/imageDecoder.test.ts mobile/tests/components/CameraKiosk.test.tsx run_me.ps1
+git commit -m "fix(mobile): resolve ONNX JSI feed crash with cpuData tensor, add jpeg decoder, real-time DB sync and manual sync trigger"
+
+Write-Host "==> [5/5] Pushing changes to GitHub main..." -ForegroundColor Cyan
+git push origin main
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Notice: 'git push origin main' returned non-zero (checking current active branch)..." -ForegroundColor Yellow
+    git push
+}
+
+Write-Host "Phase M8_ONNX_FEED_TENSOR_AND_DB_SYNC_FIX complete! Changes pushed to GitHub." -ForegroundColor Green
+Write-Host ""
+Write-Host "To build the updated preview APK with EAS, run:" -ForegroundColor Yellow
+Write-Host "cd mobile; npx eas-cli build --platform android --profile preview" -ForegroundColor Yellow
+

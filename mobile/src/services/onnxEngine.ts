@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import { Asset } from 'expo-asset';
 
 export interface LoadedEdgeSessions {
@@ -7,6 +7,41 @@ export interface LoadedEdgeSessions {
   liveSession: any | null;
   hardwareProvider: 'nnapi' | 'coreml' | 'cpu' | 'wasm' | 'managed-fallback';
   isNativeAccelerated: boolean;
+}
+
+export interface EngineDiagnostics {
+  isNativeOrtAvailable: boolean;
+  hardwareProvider: 'nnapi' | 'coreml' | 'cpu' | 'wasm' | 'managed-fallback' | 'uninitialized';
+  detLoaded: boolean;
+  recLoaded: boolean;
+  liveLoaded: boolean;
+  fallbackReason: string | null;
+  timestamp: string;
+}
+
+let diagnosticsState: EngineDiagnostics = {
+  isNativeOrtAvailable: false,
+  hardwareProvider: 'uninitialized',
+  detLoaded: false,
+  recLoaded: false,
+  liveLoaded: false,
+  fallbackReason: null,
+  timestamp: new Date().toISOString(),
+};
+
+export function getEngineDiagnostics(): EngineDiagnostics {
+  return { ...diagnosticsState };
+}
+
+/**
+ * Helper to safely check if the onnxruntime-react-native native module is bound in the binary.
+ */
+export function isNativeOrtAvailable(): boolean {
+  try {
+    return Platform.OS !== 'web' && !!NativeModules?.Onnxruntime;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -44,7 +79,14 @@ export async function createHardwareAwareSession(modelPathOrUri: string): Promis
     }
   }
 
-  // Native Mobile: onnxruntime-react-native
+  // Native Mobile: verify NativeModules.Onnxruntime exists BEFORE requiring onnxruntime-react-native.
+  // When NativeModules.Onnxruntime is missing, onnxruntime-react-native/lib/binding.ts executes
+  // Module.install() which throws: TypeError: Cannot read property 'install' of null / undefined.
+  if (!isNativeOrtAvailable()) {
+    console.warn('[ONNXEngine] NativeModules.Onnxruntime not found in binary. Using server fallback.');
+    throw new Error('NATIVE_ORT_UNAVAILABLE');
+  }
+
   try {
     const ortNative = require('onnxruntime-react-native');
 
@@ -74,9 +116,8 @@ export async function createHardwareAwareSession(modelPathOrUri: string): Promis
       return { session, provider: 'cpu' };
     }
   } catch (nativeErr: any) {
-    // Graceful fallback for Expo Go where native C++ libraries cannot be loaded
     console.warn(
-      '[ONNXEngine] Native onnxruntime-react-native module not linked. Fallback mode active:',
+      '[ONNXEngine] Native onnxruntime-react-native session creation failed:',
       nativeErr?.message || nativeErr
     );
     throw new Error('NATIVE_ORT_UNAVAILABLE');
@@ -90,6 +131,29 @@ export async function createHardwareAwareSession(modelPathOrUri: string): Promis
 export async function loadAllEdgeSessions(): Promise<LoadedEdgeSessions> {
   console.log('[ONNXEngine] Initializing Edge AI Inference Sessions with packaged INT8 models...');
 
+  const nativeAvailable = isNativeOrtAvailable();
+  diagnosticsState.isNativeOrtAvailable = nativeAvailable;
+  diagnosticsState.timestamp = new Date().toISOString();
+
+  // Fast check: if native module is not linked in binary, immediately return managed-fallback
+  if (Platform.OS !== 'web' && !nativeAvailable) {
+    const reason = 'NativeModules.Onnxruntime missing in APK binary (autolinking issue)';
+    console.log(`[ONNXEngine] ${reason}. Operating in managed mode (server delegate).`);
+    diagnosticsState.hardwareProvider = 'managed-fallback';
+    diagnosticsState.detLoaded = false;
+    diagnosticsState.recLoaded = false;
+    diagnosticsState.liveLoaded = false;
+    diagnosticsState.fallbackReason = reason;
+
+    return {
+      detSession: null,
+      recSession: null,
+      liveSession: null,
+      hardwareProvider: 'managed-fallback',
+      isNativeAccelerated: false,
+    };
+  }
+
   try {
     let detAsset: any, recAsset: any, liveAsset: any;
     try {
@@ -97,6 +161,8 @@ export async function loadAllEdgeSessions(): Promise<LoadedEdgeSessions> {
       recAsset = require('../../assets/models/w600k_r50_int8.onnx');
       liveAsset = require('../../assets/models/minifasnet_int8.onnx');
     } catch (reqErr: any) {
+      const reason = `Model asset files unavailable: ${reqErr?.message || reqErr}`;
+      diagnosticsState.fallbackReason = reason;
       console.warn('[ONNXEngine] Could not require model assets:', reqErr?.message || reqErr);
       throw new Error('MODEL_ASSETS_UNAVAILABLE');
     }
@@ -107,14 +173,19 @@ export async function loadAllEdgeSessions(): Promise<LoadedEdgeSessions> {
       getLocalModelPath(liveAsset),
     ]);
 
-    const [detRes, recRes, liveRes] = await Promise.all([
-      createHardwareAwareSession(detPath),
-      createHardwareAwareSession(recPath),
-      createHardwareAwareSession(livePath),
-    ]);
+    // Load sequentially to minimize peak native C++ heap allocations
+    const detRes = await createHardwareAwareSession(detPath);
+    const recRes = await createHardwareAwareSession(recPath);
+    const liveRes = await createHardwareAwareSession(livePath);
 
     const activeProvider = detRes.provider as any;
     console.log(`[ONNXEngine] All 3 Edge models loaded successfully on [${activeProvider.toUpperCase()}] backend.`);
+
+    diagnosticsState.hardwareProvider = activeProvider;
+    diagnosticsState.detLoaded = true;
+    diagnosticsState.recLoaded = true;
+    diagnosticsState.liveLoaded = true;
+    diagnosticsState.fallbackReason = null;
 
     return {
       detSession: detRes.session,
@@ -124,6 +195,13 @@ export async function loadAllEdgeSessions(): Promise<LoadedEdgeSessions> {
       isNativeAccelerated: activeProvider === 'nnapi' || activeProvider === 'coreml',
     };
   } catch (err: any) {
+    const reason = err?.message || String(err);
+    diagnosticsState.hardwareProvider = 'managed-fallback';
+    diagnosticsState.detLoaded = false;
+    diagnosticsState.recLoaded = false;
+    diagnosticsState.liveLoaded = false;
+    diagnosticsState.fallbackReason = diagnosticsState.fallbackReason || reason;
+
     if (err?.message === 'NATIVE_ORT_UNAVAILABLE' || err?.message === 'MODEL_ASSETS_UNAVAILABLE') {
       console.log('[ONNXEngine] Operating in managed mode (server delegate).');
     } else {

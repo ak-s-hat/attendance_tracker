@@ -1,4 +1,5 @@
 import { BoundingBox, FrameData, LivenessResult } from './types';
+import { createOrtTensor } from './tensorUtils';
 
 export class MiniFASNetLiveness {
   private session: any;
@@ -126,11 +127,7 @@ export class MiniFASNetLiveness {
 
     const inputName = this.session.inputNames ? this.session.inputNames[0] : 'data';
     const feeds: Record<string, any> = {};
-    feeds[inputName] = {
-      data: inputTensor,
-      dims: [1, 3, this.inputSize, this.inputSize],
-      type: 'float32',
-    };
+    feeds[inputName] = createOrtTensor('float32', inputTensor, [1, 3, this.inputSize, this.inputSize]);
 
     const outputs = await this.session.run(feeds);
     const outputName = this.session.outputNames ? this.session.outputNames[0] : Object.keys(outputs)[0];

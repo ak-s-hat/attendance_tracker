@@ -46,4 +46,7 @@ export interface PipelineResult {
   is_live?: boolean;
   embedding?: number[]; // 512 float array sent to API
   timestamp: string;
+  executionMode?: 'ONNX_LOCAL' | 'SERVER_FALLBACK';
+  inferenceLatencyMs?: number;
+  errorMessage?: string;
 }
