@@ -61,16 +61,21 @@ export const CameraKiosk: React.FC<CameraKioskProps> = ({
   const handleManualSync = useCallback(async () => {
     if (isSyncing) return;
     setIsSyncing(true);
-    setSyncFeedback('Syncing with server...');
+    setSyncFeedback(`Connecting to ${apiBaseUrl}...`);
     try {
       const res = await forceSyncAll(apiBaseUrl);
-      setCachedEmployeeCount(res.cachedTotal);
-      setPendingSyncCount(0);
-      setSyncFeedback(`✅ Synced! ${res.cachedTotal} employees loaded.`);
-      setTimeout(() => setSyncFeedback(null), 4000);
+      if (res.error) {
+        setSyncFeedback(`❌ Sync failed: ${res.error}`);
+        setTimeout(() => setSyncFeedback(null), 8000);
+      } else {
+        setCachedEmployeeCount(res.cachedTotal);
+        setPendingSyncCount(0);
+        setSyncFeedback(`✅ Synced! ${res.cachedTotal} employees loaded.`);
+        setTimeout(() => setSyncFeedback(null), 5000);
+      }
     } catch (err: any) {
-      setSyncFeedback(`❌ Sync failed: ${err?.message || 'Server error'}`);
-      setTimeout(() => setSyncFeedback(null), 5000);
+      setSyncFeedback(`❌ Sync error: ${err?.message || 'Server unreachable'}`);
+      setTimeout(() => setSyncFeedback(null), 8000);
     } finally {
       setIsSyncing(false);
     }

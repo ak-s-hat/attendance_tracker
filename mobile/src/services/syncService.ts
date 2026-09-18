@@ -188,24 +188,36 @@ export async function flushPendingAttendanceLogs(apiBaseUrl: string, authToken?:
 /**
  * PULL updated employee face embeddings delta from cloud (e.g. at login or app startup)
  */
-export async function syncEmployeeEmbeddingsDelta(apiBaseUrl: string, authToken?: string): Promise<number> {
+export async function syncEmployeeEmbeddingsDelta(
+  apiBaseUrl: string,
+  authToken?: string
+): Promise<{ count: number; error?: string }> {
   try {
+    console.log(`[EdgeSync] Fetching employee embeddings delta from: ${apiBaseUrl}`);
     const deltas = await fetchEmployeeEmbeddingsDelta(apiBaseUrl, lastGallerySyncIso, authToken);
-    if (deltas.length > 0) {
+    console.log(`[EdgeSync] Server returned ${deltas?.length || 0} employees.`);
+
+    if (deltas && deltas.length > 0) {
       await saveOrUpdateCachedEmployees(deltas);
       lastGallerySyncIso = new Date().toISOString();
 
       const updatedLocal = await getAllCachedEmployees();
       vectorGallery.loadGallery(updatedLocal);
-      console.log(`[EdgeSync] Synced & updated vector gallery (${vectorGallery.getGallerySize()} employees).`);
-      notifySyncListeners();
-      return deltas.length;
+      console.log(`[EdgeSync] Vector gallery reloaded with ${vectorGallery.getGallerySize()} employees.`);
+      await notifySyncListeners();
+      return { count: deltas.length };
     }
-    notifySyncListeners();
-    return 0;
+
+    // If delta was 0, reload whatever is already in local SQLite
+    const local = await getAllCachedEmployees();
+    vectorGallery.loadGallery(local);
+    await notifySyncListeners();
+    return { count: local.length };
   } catch (err: any) {
-    console.warn('[EdgeSync] syncEmployeeEmbeddingsDelta failed:', err?.message || err);
-    return 0;
+    const msg = err?.response?.data?.detail || err?.message || String(err);
+    console.warn('[EdgeSync] syncEmployeeEmbeddingsDelta failed:', msg);
+    await notifySyncListeners();
+    return { count: 0, error: msg };
   }
 }
 
@@ -215,16 +227,17 @@ export async function syncEmployeeEmbeddingsDelta(apiBaseUrl: string, authToken?
 export async function forceSyncAll(
   apiBaseUrl: string,
   authToken?: string
-): Promise<{ pushed: number; pulled: number; cachedTotal: number }> {
+): Promise<{ pushed: number; pulled: number; cachedTotal: number; error?: string }> {
   // Reset sync watermark to pull all registered employees
   lastGallerySyncIso = undefined;
   const pushed = await flushPendingAttendanceLogs(apiBaseUrl, authToken);
-  const pulled = await syncEmployeeEmbeddingsDelta(apiBaseUrl, authToken);
+  const pullResult = await syncEmployeeEmbeddingsDelta(apiBaseUrl, authToken);
   const stats = await getOfflineDbStats();
   await notifySyncListeners();
   return {
     pushed,
-    pulled,
+    pulled: pullResult.count,
     cachedTotal: stats.cachedCount,
+    error: pullResult.error,
   };
 }

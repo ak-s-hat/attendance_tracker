@@ -45,6 +45,18 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
 }
 
 async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
+  // 1. Verify existing schema if table was created by older builds
+  try {
+    const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(cached_employees)');
+    const colNames = columns.map((c) => c.name);
+    if (colNames.length > 0 && !colNames.includes('embedding_json')) {
+      console.warn('[OfflineDB] Older cached_employees schema detected, dropping table to recreate...');
+      await db.execAsync('DROP TABLE IF EXISTS cached_employees');
+    }
+  } catch (schemaErr) {
+    console.warn('[OfflineDB] Schema check error:', schemaErr);
+  }
+
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
 
@@ -75,21 +87,27 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 }
 
 /**
- * Bulk updates or replaces cached employees with their 512-d embeddings
+ * Bulk updates or replaces cached employees with their 512-d embeddings.
+ * Writes directly to avoid multi-connection SQLITE_BUSY deadlocks.
  */
 export async function saveOrUpdateCachedEmployees(employees: CachedEmployee[]): Promise<void> {
   const db = await getDb();
-  await db.withTransactionAsync(async () => {
-    for (const emp of employees) {
-      if (!emp.embedding || emp.embedding.length === 0) continue;
-      const embeddingJson = JSON.stringify(emp.embedding);
-      await db.runAsync(
-        `INSERT OR REPLACE INTO cached_employees (id, name, department, job_title, embedding_json, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [emp.id, emp.name, emp.department || 'General', emp.job_title || null, embeddingJson, emp.updated_at || new Date().toISOString()]
-      );
-    }
-  });
+  for (const emp of employees) {
+    if (!emp.embedding || emp.embedding.length === 0) continue;
+    const embeddingJson = JSON.stringify(emp.embedding);
+    await db.runAsync(
+      `INSERT OR REPLACE INTO cached_employees (id, name, department, job_title, embedding_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        emp.id,
+        emp.name,
+        emp.department || 'General',
+        emp.job_title || null,
+        embeddingJson,
+        emp.updated_at || new Date().toISOString(),
+      ]
+    );
+  }
 }
 
 /**
@@ -106,14 +124,25 @@ export async function getAllCachedEmployees(): Promise<CachedEmployee[]> {
     updated_at: string;
   }>('SELECT * FROM cached_employees ORDER BY name ASC');
 
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    department: r.department,
-    job_title: r.job_title,
-    embedding: JSON.parse(r.embedding_json),
-    updated_at: r.updated_at,
-  }));
+  const result: CachedEmployee[] = [];
+  for (const r of rows) {
+    try {
+      const parsedEmbedding = JSON.parse(r.embedding_json);
+      if (Array.isArray(parsedEmbedding) && parsedEmbedding.length > 0) {
+        result.push({
+          id: r.id,
+          name: r.name,
+          department: r.department,
+          job_title: r.job_title,
+          embedding: parsedEmbedding,
+          updated_at: r.updated_at,
+        });
+      }
+    } catch (parseErr) {
+      console.warn(`[OfflineDB] Skipping corrupt embedding for employee ${r.id}:`, parseErr);
+    }
+  }
+  return result;
 }
 
 /**
