@@ -203,8 +203,6 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
     try {
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.8,
-        skipProcessing: true,
-        shutterSound: false,
       });
       if (photo && photo.uri) {
         setIsCameraOpen(false);

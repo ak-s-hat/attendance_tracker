@@ -506,9 +506,10 @@ export async function enrollEmployeeFace(
     type: 'image/jpeg',
   } as any);
 
+  // Do NOT set Content-Type manually — React Native must auto-generate
+  // the multipart boundary string. Setting it manually strips the boundary.
   const response = await axios.post(url, formData, {
     headers: {
-      'Content-Type': 'multipart/form-data',
       ...getAuthHeaders(token),
     },
     timeout: 15000,
@@ -547,7 +548,6 @@ export async function postImageCheckin(
 
   const response = await axios.post<CheckinEmbeddingResponse>(url, formData, {
     headers: {
-      'Content-Type': 'multipart/form-data',
       ...getAuthHeaders(),
     },
     timeout: 15000,

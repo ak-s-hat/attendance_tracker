@@ -158,8 +158,6 @@ export const CameraKiosk: React.FC<CameraKioskProps> = ({
     try {
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.5,
-        skipProcessing: true,
-        shutterSound: false,
         base64: true,
       });
 

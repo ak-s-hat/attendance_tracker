@@ -136,8 +136,8 @@ export class EdgeAIPipeline {
         };
       }
 
-      // Step 3: Compute 512-d ArcFace Face Embedding
-      const embeddingTensor = await this.recognizer.getEmbedding(frame, detResult.bbox);
+      // Step 3: Compute 512-d ArcFace Face Embedding with 5-point landmark alignment
+      const embeddingTensor = await this.recognizer.getEmbedding(frame, detResult.bbox, detResult.landmarks);
       embeddingArray = Array.from(embeddingTensor);
     } catch (onnxErr: any) {
       console.warn('[EdgeAIPipeline] On-device ONNX inference failed:', onnxErr?.message || onnxErr);

@@ -137,8 +137,8 @@ class LivenessChecker:
             )
 
             resized = cv2.resize(crop, (target_w, target_h))
-            resized_rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-            input_tensor = resized_rgb.astype(np.float32).transpose(2, 0, 1)
+            # MiniFASNet was trained on BGR images — do NOT convert to RGB
+            input_tensor = resized.astype(np.float32).transpose(2, 0, 1)
             input_tensor = np.expand_dims(input_tensor, axis=0)
 
             outputs = self.session.run(None, {self.input_name: input_tensor})

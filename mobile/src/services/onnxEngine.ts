@@ -159,7 +159,7 @@ export async function loadAllEdgeSessions(): Promise<LoadedEdgeSessions> {
     try {
       detAsset = require('../../assets/models/det_10g_int8.onnx');
       recAsset = require('../../assets/models/w600k_r50_int8.onnx');
-      liveAsset = require('../../assets/models/minifasnet_int8.onnx');
+      liveAsset = require('../../assets/models/minifasnet_v2_se.onnx');
     } catch (reqErr: any) {
       const reason = `Model asset files unavailable: ${reqErr?.message || reqErr}`;
       diagnosticsState.fallbackReason = reason;

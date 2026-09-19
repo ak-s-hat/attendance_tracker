@@ -95,16 +95,18 @@ export async function saveOrUpdateCachedEmployees(employees: CachedEmployee[]): 
   for (const emp of employees) {
     if (!emp.embedding || emp.embedding.length === 0) continue;
     const embeddingJson = JSON.stringify(emp.embedding);
+    // Sanitize ALL values to strict primitives — never pass null or objects to expo-sqlite
+    // as the Kotlin JNI bridge (FrontendConverter.cpp) throws "Cannot convert '[object Object]' to a Kotlin type"
     await db.runAsync(
       `INSERT OR REPLACE INTO cached_employees (id, name, department, job_title, embedding_json, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [
-        emp.id,
-        emp.name,
-        emp.department || 'General',
-        emp.job_title || null,
+        String(emp.id),
+        String(emp.name),
+        String(emp.department || 'General'),
+        String(emp.job_title || ''),
         embeddingJson,
-        emp.updated_at || new Date().toISOString(),
+        String(emp.updated_at || new Date().toISOString()),
       ]
     );
   }
@@ -155,13 +157,13 @@ export async function enqueueOfflineScan(record: Omit<OfflineAttendanceRecord, '
      (id, employee_id, employee_name, check_type, timestamp, confidence_score, liveness_score, status)
      VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING')`,
     [
-      record.id,
-      record.employee_id,
-      record.employee_name,
-      record.check_type,
-      record.timestamp,
-      record.confidence_score,
-      record.liveness_score,
+      String(record.id),
+      String(record.employee_id),
+      String(record.employee_name),
+      String(record.check_type),
+      String(record.timestamp),
+      Number(record.confidence_score) || 0.0,
+      Number(record.liveness_score) || 0.0,
     ]
   );
 }
@@ -192,11 +194,15 @@ export async function getPendingScans(): Promise<OfflineAttendanceRecord[]> {
  */
 export async function markScansAsSynced(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
+  // Defensively extract primitive string IDs in case objects like {id: '...'} are passed
+  const safeIds = ids.map((item: any) =>
+    typeof item === 'object' && item !== null ? String(item.id || item) : String(item)
+  );
   const db = await getDb();
-  const placeholders = ids.map(() => '?').join(',');
+  const placeholders = safeIds.map(() => '?').join(',');
   await db.runAsync(
     `UPDATE offline_attendance_queue SET status = 'SYNCED' WHERE id IN (${placeholders})`,
-    ids
+    safeIds
   );
 }
 

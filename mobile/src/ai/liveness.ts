@@ -80,7 +80,7 @@ export class MiniFASNetLiveness {
 
   /**
    * Preprocess frame crop into (1, 3, 80, 80) float32 NCHW tensor
-   * Pixels are raw float values [0..255]
+   * MiniFASNet was trained with BGR channel order and raw [0..255] pixel values
    */
   public preprocess(frame: FrameData, expandedBox: BoundingBox): Float32Array {
     const [x1, y1, x2, y2] = expandedBox.map(Math.round);
@@ -99,15 +99,15 @@ export class MiniFASNetLiveness {
         const sy = Math.min(frame.height - 1, Math.max(0, y1 + Math.floor((dy / this.inputSize) * cropH)));
         const srcIdx = (sy * frame.width + sx) * channels;
 
-        // RGB values float [0..255]
+        // Input frame is RGB(A); MiniFASNet expects BGR channel order
         const r = frame.data[srcIdx] || 0;
         const g = frame.data[srcIdx + 1] || 0;
         const b = frame.data[srcIdx + 2] || 0;
 
         const spatialIdx = dy * this.inputSize + dx;
-        tensor[spatialIdx] = r;
-        tensor[planeSize + spatialIdx] = g;
-        tensor[planeSize * 2 + spatialIdx] = b;
+        tensor[spatialIdx] = b;                  // B channel (plane 0)
+        tensor[planeSize + spatialIdx] = g;     // G channel (plane 1)
+        tensor[planeSize * 2 + spatialIdx] = r; // R channel (plane 2)
       }
     }
     return tensor;
@@ -122,7 +122,8 @@ export class MiniFASNetLiveness {
       return { isLive: true, score: 1.0, note: 'liveness_stub_fallback' };
     }
 
-    const expandedBox = this.expandBoundingBox(bbox, frame.width, frame.height, 1.5);
+    // MiniFASNetV2 requires 2.7x expanded context crop for accurate spatial feature analysis
+    const expandedBox = this.expandBoundingBox(bbox, frame.width, frame.height, 2.7);
     const inputTensor = this.preprocess(frame, expandedBox);
 
     const inputName = this.session.inputNames ? this.session.inputNames[0] : 'data';

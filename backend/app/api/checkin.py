@@ -327,6 +327,7 @@ async def enroll_face(
     """
     POST /api/checkin/enroll
     Assign or update face embedding for an employee. Checks for duplicate faces.
+    Enrollment skips liveness check — only requires a valid face detection and embedding.
     """
     pipeline = request.app.state.pipeline
 
@@ -345,20 +346,27 @@ async def enroll_face(
     if not image_bytes:
         raise HTTPException(status_code=400, detail="Empty image file")
 
-    result = pipeline.process(image_bytes)
-    if result["status"] != "ready_for_matching":
+    # Enrollment uses detect + embed directly, skipping liveness to avoid
+    # false-positive spoof rejections during admin face registration
+    if not pipeline._loaded:
+        pipeline.load_models()
+
+    detection = pipeline.detector.detect(image_bytes)
+    if not detection["success"]:
         raise HTTPException(
             status_code=422,
-            detail=f"Face detection failed: {result.get('reason', 'unknown')}",
+            detail=f"Face detection failed: {detection.get('reason', 'unknown')}",
         )
 
-    # Duplicate face collision check against existing employees (Item 3)
+    embedding = pipeline.recognizer.get_embedding(detection["face_object"])
+
+    # Duplicate face collision check against existing employees
     sys_settings = await get_or_create_settings(db)
     dup_thresh = sys_settings.duplicate_face_threshold
 
     existing_match, match_sim = await attendance_service.find_matching_employee(
         session=db,
-        query_embedding=result["embedding"],
+        query_embedding=embedding,
         threshold=dup_thresh,
     )
     if existing_match and existing_match.id != emp_uuid:
@@ -367,7 +375,7 @@ async def enroll_face(
             detail=f"This face is already registered under employee '{existing_match.name}'. Each employee must have a unique facial identity.",
         )
 
-    employee.face_embedding = result["embedding"].tolist()
+    employee.face_embedding = embedding.tolist()
     await db.commit()
 
     logger.info("Enrolled face for employee %s (%s)", employee.name, employee.id)
