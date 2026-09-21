@@ -146,6 +146,8 @@ async def get_employee_embeddings_delta(
     if since:
         try:
             since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            if since_dt.tzinfo is None:
+                since_dt = since_dt.replace(tzinfo=timezone.utc)
             stmt = stmt.where(Employee.updated_at >= since_dt)
         except Exception:
             pass  # If invalid date, return all active embeddings

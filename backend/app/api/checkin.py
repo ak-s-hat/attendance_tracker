@@ -507,14 +507,25 @@ async def batch_sync_checkins(
 
     synced_ids = []
     for evt in payload.events:
-        # Check if record with client ID or exact timestamp already exists
+        ts = evt.timestamp if evt.timestamp.tzinfo else evt.timestamp.replace(tzinfo=timezone.utc)
+        # Prevent duplicate attendance log on network retry
+        existing_log = await db.execute(
+            select(AttendanceLog.id).where(
+                AttendanceLog.employee_id == evt.employee_id,
+                AttendanceLog.timestamp == ts,
+            ).limit(1)
+        )
+        if existing_log.scalar_one_or_none():
+            synced_ids.append(evt.id)
+            continue
+
         log_entry = AttendanceLog(
             employee_id=evt.employee_id,
             check_type=evt.check_type,
             status="SUCCESS",
             confidence_score=evt.confidence_score,
             device_id=payload.device_id,
-            timestamp=evt.timestamp if evt.timestamp.tzinfo else evt.timestamp.replace(tzinfo=timezone.utc),
+            timestamp=ts,
         )
         db.add(log_entry)
         synced_ids.append(evt.id)

@@ -50,13 +50,18 @@ class FaceDetector:
         """Download (first run) and prepare the SCRFD detector + ArcFace model with minimal RAM footprint."""
         from insightface.app import FaceAnalysis
 
-        logger.info(
-            "FaceDetector: loading %s from %s (modules: detection, recognition only)", self.model_name, MODELS_DIR
+        # Check if model exists in MODELS_DIR first; fallback to ~/.insightface where Dockerfile caches it
+        insight_root = (
+            str(MODELS_DIR)
+            if (MODELS_DIR / "models" / self.model_name).exists()
+            else os.path.expanduser("~/.insightface")
         )
-        # allowed_modules prevents loading unused 2d106, 3d68, and genderage models into RAM (<120MB total)
+        logger.info(
+            "FaceDetector: loading %s from %s (modules: detection, recognition only)", self.model_name, insight_root
+        )
         self.app = FaceAnalysis(
             name=self.model_name,
-            root=str(MODELS_DIR),
+            root=insight_root,
             allowed_modules=["detection", "recognition"],
         )
         self.app.prepare(ctx_id=-1, det_size=(320, 320))  # CPU optimized resolution
@@ -74,7 +79,11 @@ class FaceDetector:
         if self.app is None:
             raise RuntimeError("FaceDetector not loaded — call load() first")
 
-        img = bytes_to_cv2(image_bytes)
+        try:
+            img = bytes_to_cv2(image_bytes)
+        except ValueError:
+            return {"success": False, "reason": "invalid_image_format"}
+
         faces = self.app.get(img)
 
         # Filter by minimum detection score
