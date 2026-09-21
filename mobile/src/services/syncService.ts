@@ -3,6 +3,7 @@ import {
   getAllCachedEmployees,
   getPendingScans,
   markScansAsSynced,
+  markScansAsFailed,
   saveOrUpdateCachedEmployees,
   getOfflineDbStats,
 } from '../database/offlineDb';
@@ -14,6 +15,7 @@ import {
 } from './api';
 
 let isSyncing = false;
+let isFlushInProgress = false;
 let lastGallerySyncIso: string | undefined = undefined;
 let isEdgeSyncInitialized = false;
 
@@ -86,7 +88,7 @@ export async function runFullSyncCycle(apiBaseUrl: string, authToken?: string): 
   syncedLogs: number;
   cachedEmployees: number;
 }> {
-  if (isSyncing) {
+  if (isSyncing || isFlushInProgress) {
     const stats = await getOfflineDbStats();
     return { syncedLogs: 0, cachedEmployees: stats.cachedCount };
   }
@@ -122,7 +124,12 @@ export async function runFullSyncCycle(apiBaseUrl: string, authToken?: string): 
           console.log(`[EdgeSync] Successfully flushed ${syncedCount} offline scans to cloud.`);
         }
       } catch (pushErr: any) {
-        console.warn('[EdgeSync] Log push failed (will retry next cycle):', pushErr?.message || pushErr);
+        if (pushErr?.response?.status && pushErr.response.status >= 400 && pushErr.response.status < 500) {
+          console.error('[EdgeSync] Push rejected (4xx). Marking scans as failed:', pushErr?.response?.data || pushErr.message);
+          await markScansAsFailed(pendingScans.map((s) => s.id), pushErr?.response?.data?.detail || '4xx error');
+        } else {
+          console.warn('[EdgeSync] Log push failed (will retry next cycle):', pushErr?.message || pushErr);
+        }
       }
     }
 
@@ -158,8 +165,18 @@ export async function runFullSyncCycle(apiBaseUrl: string, authToken?: string): 
  * PUSH pending attendance scans from phone to cloud (background task)
  */
 export async function flushPendingAttendanceLogs(apiBaseUrl: string, authToken?: string): Promise<number> {
+  if (isFlushInProgress || isSyncing) {
+    return 0;
+  }
+
+  isFlushInProgress = true;
   let syncedCount = 0;
   try {
+    const netState = await NetInfo.fetch();
+    if (!netState.isConnected) {
+      return 0;
+    }
+
     const pendingScans = await getPendingScans();
     if (pendingScans.length === 0) return 0;
 
@@ -172,15 +189,27 @@ export async function flushPendingAttendanceLogs(apiBaseUrl: string, authToken?:
       liveness_score: s.liveness_score,
     }));
 
-    const syncRes = await syncBatchAttendanceLogs(apiBaseUrl, 'kiosk-mobile-edge', payload, authToken);
-    if (syncRes.success && syncRes.synced_ids.length > 0) {
-      await markScansAsSynced(syncRes.synced_ids);
-      syncedCount = syncRes.synced_ids.length;
-      console.log(`[EdgeSync] Background flushed ${syncedCount} offline scans to cloud.`);
-      notifySyncListeners();
+    try {
+      const syncRes = await syncBatchAttendanceLogs(apiBaseUrl, 'kiosk-mobile-edge', payload, authToken);
+      if (syncRes.success && syncRes.synced_ids.length > 0) {
+        await markScansAsSynced(syncRes.synced_ids);
+        syncedCount = syncRes.synced_ids.length;
+        console.log(`[EdgeSync] Background flushed ${syncedCount} offline scans to cloud.`);
+        notifySyncListeners();
+      }
+    } catch (pushErr: any) {
+      if (pushErr?.response?.status && pushErr.response.status >= 400 && pushErr.response.status < 500) {
+        console.error('[EdgeSync] Background push rejected (4xx). Marking scans as failed:', pushErr?.response?.data || pushErr.message);
+        await markScansAsFailed(pendingScans.map((s) => s.id), pushErr?.response?.data?.detail || '4xx error');
+        notifySyncListeners();
+      } else {
+        console.warn('[EdgeSync] flushPendingAttendanceLogs push failed:', pushErr?.message || pushErr);
+      }
     }
   } catch (err: any) {
     console.warn('[EdgeSync] flushPendingAttendanceLogs failed:', err?.message || err);
+  } finally {
+    isFlushInProgress = false;
   }
   return syncedCount;
 }

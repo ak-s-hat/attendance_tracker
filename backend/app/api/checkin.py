@@ -9,6 +9,7 @@ import numpy as np
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.settings import get_or_create_settings
@@ -322,6 +323,7 @@ async def enroll_face(
     request: Request,
     image: UploadFile = File(..., description="JPEG face image for enrollment"),
     employee_id: str = Form(..., description="UUID of the employee to enroll"),
+    current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -376,6 +378,7 @@ async def enroll_face(
         )
 
     employee.face_embedding = embedding.tolist()
+    employee.updated_at = datetime.now(timezone.utc)
     await db.commit()
 
     logger.info("Enrolled face for employee %s (%s)", employee.name, employee.id)

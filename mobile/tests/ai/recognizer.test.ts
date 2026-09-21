@@ -83,4 +83,83 @@ describe('ArcFaceRecognizer Unit Tests', () => {
 
     expect(mockSession.run).toHaveBeenCalledTimes(1);
   });
+
+  it('should accurately compute 2D Umeyama similarity transform matrix for rotated face landmarks', () => {
+    // Canonical ArcFace 112x112 target landmarks
+    const dstLandmarks: [number, number][] = [
+      [38.2946, 51.6963],
+      [73.5318, 51.5014],
+      [56.0252, 71.7366],
+      [41.5493, 92.3655],
+      [70.7299, 92.2041],
+    ];
+
+    // Create rotated (15 deg) and scaled (1.2x) source landmarks
+    const angle = (15 * Math.PI) / 180;
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+    const scale = 1.2;
+    const tx = 25;
+    const ty = 35;
+
+    const srcLandmarks: [number, number][] = dstLandmarks.map(([x, y]) => {
+      // Inverse rotation to simulate detected face landmarks
+      const rx = (x * cosA - y * sinA) * scale + tx;
+      const ry = (x * sinA + y * cosA) * scale + ty;
+      return [rx, ry];
+    });
+
+    const M = ArcFaceRecognizer.estimateSimilarityTransform(srcLandmarks, dstLandmarks);
+    expect(M).not.toBeNull();
+    if (!M) return;
+
+    const [m00, m01, mTx, m10, m11, mTy] = M;
+
+    // Verify rotation matrix det > 0
+    const detR = m00 * m11 - m01 * m10;
+    expect(detR).toBeGreaterThan(0);
+
+    // Verify mapping of transformed landmarks closely matches destination landmarks
+    for (let i = 0; i < srcLandmarks.length; i++) {
+      const [sx, sy] = srcLandmarks[i];
+      const mappedX = m00 * sx + m01 * sy + mTx;
+      const mappedY = m10 * sx + m11 * sy + mTy;
+      expect(mappedX).toBeCloseTo(dstLandmarks[i][0], 1);
+      expect(mappedY).toBeCloseTo(dstLandmarks[i][1], 1);
+    }
+  });
+
+  it('should maintain RGB channel order in cropAndPreprocess and alignAndPreprocess', () => {
+    const recognizer = new ArcFaceRecognizer(null);
+    const width = 112;
+    const height = 112;
+    const data = new Uint8Array(width * height * 4);
+
+    // Fill image with pure RED: R=255, G=0, B=0, A=255
+    for (let i = 0; i < width * height; i++) {
+      data[i * 4] = 255;     // R
+      data[i * 4 + 1] = 0;   // G
+      data[i * 4 + 2] = 0;   // B
+      data[i * 4 + 3] = 255; // A
+    }
+
+    const frame: FrameData = { data, width, height };
+    const planeSize = 112 * 112;
+
+    // Test cropAndPreprocess
+    const cropTensor = recognizer.cropAndPreprocess(frame, [0, 0, 112, 112]);
+    // Plane 0 (R) should be (255 - 127.5)/127.5 = 1.0
+    expect(cropTensor[0]).toBeCloseTo(1.0, 4);
+    // Plane 1 (G) should be (0 - 127.5)/127.5 = -1.0
+    expect(cropTensor[planeSize]).toBeCloseTo(-1.0, 4);
+    // Plane 2 (B) should be (0 - 127.5)/127.5 = -1.0
+    expect(cropTensor[planeSize * 2]).toBeCloseTo(-1.0, 4);
+
+    // Test alignAndPreprocess with identity transform
+    const alignTensor = recognizer.alignAndPreprocess(frame, [1, 0, 0, 0, 1, 0]);
+    expect(alignTensor[0]).toBeCloseTo(1.0, 4);
+    expect(alignTensor[planeSize]).toBeCloseTo(-1.0, 4);
+    expect(alignTensor[planeSize * 2]).toBeCloseTo(-1.0, 4);
+  });
 });
+

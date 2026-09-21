@@ -190,7 +190,7 @@ export async function getPendingScans(): Promise<OfflineAttendanceRecord[]> {
 }
 
 /**
- * Marks a batch of attendance scans as synced
+ * Marks a batch of attendance scans as synced (chunked in batches of 100)
  */
 export async function markScansAsSynced(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
@@ -199,11 +199,35 @@ export async function markScansAsSynced(ids: string[]): Promise<void> {
     typeof item === 'object' && item !== null ? String(item.id || item) : String(item)
   );
   const db = await getDb();
-  const placeholders = safeIds.map(() => '?').join(',');
-  await db.runAsync(
-    `UPDATE offline_attendance_queue SET status = 'SYNCED' WHERE id IN (${placeholders})`,
-    safeIds
+  const chunkSize = 100;
+  for (let i = 0; i < safeIds.length; i += chunkSize) {
+    const chunk = safeIds.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => '?').join(',');
+    await db.runAsync(
+      `UPDATE offline_attendance_queue SET status = 'SYNCED' WHERE id IN (${placeholders})`,
+      chunk
+    );
+  }
+}
+
+/**
+ * Marks a batch of attendance scans as failed with an error message (poison-pill prevention)
+ */
+export async function markScansAsFailed(ids: string[], errorMessage?: string): Promise<void> {
+  if (ids.length === 0) return;
+  const safeIds = ids.map((item: any) =>
+    typeof item === 'object' && item !== null ? String(item.id || item) : String(item)
   );
+  const db = await getDb();
+  const chunkSize = 100;
+  for (let i = 0; i < safeIds.length; i += chunkSize) {
+    const chunk = safeIds.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => '?').join(',');
+    await db.runAsync(
+      `UPDATE offline_attendance_queue SET status = 'FAILED', error_message = ? WHERE id IN (${placeholders})`,
+      [errorMessage || 'Sync failed', ...chunk]
+    );
+  }
 }
 
 /**

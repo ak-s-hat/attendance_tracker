@@ -54,35 +54,7 @@ export class ArcFaceRecognizer {
     }
     a00 /= num; a01 /= num; a10 /= num; a11 /= num;
 
-    // SVD of 2x2 matrix A using analytical formula
-    // For 2x2: A = U * diag(S) * V^T
-    const e = (a00 + a11) / 2;
-    const f = (a00 - a11) / 2;
-    const g = (a10 + a01) / 2;
-    const h = (a10 - a01) / 2;
-
-    const q = Math.sqrt(e * e + h * h);
-    const r = Math.sqrt(f * f + g * g);
-
-    const s1 = q + r;
-    const s2 = q - r;
-
-    const a1 = Math.atan2(g, f);
-    const a2 = Math.atan2(h, e);
-
-    const theta = (a2 - a1) / 2;
-    const phi = (a2 + a1) / 2;
-
-    // U and V
-    const cosTheta = Math.cos(theta), sinTheta = Math.sin(theta);
-    const cosPhi = Math.cos(phi), sinPhi = Math.sin(phi);
-
-    // d vector for sign handling
-    const detA = a00 * a11 - a01 * a10;
-    const d0 = 1;
-    const d1 = detA < 0 ? -1 : 1;
-
-    // Compute scale
+    // Variance of source points
     let srcVar = 0;
     for (let i = 0; i < num; i++) {
       const sdx = src[i][0] - srcMeanX;
@@ -92,22 +64,20 @@ export class ArcFaceRecognizer {
     srcVar /= num;
     if (srcVar < 1e-10) return null;
 
-    const scale = (d0 * s1 + d1 * s2) / srcVar;
+    // Exact closed-form 2D Umeyama solution:
+    // Any 2D rotation R that maximizes trace(R * A) with det(R) = +1 satisfies:
+    // cos(theta) = (a00 + a11) / hypot, sin(theta) = (a10 - a01) / hypot
+    const numCos = a00 + a11;
+    const numSin = a10 - a01;
+    const hypot = Math.hypot(numCos, numSin);
+    if (hypot < 1e-10) return null;
 
-    // Compute rotation matrix R = U * diag(d) * V^T
-    // U = [[cosPhi, -sinPhi], [sinPhi, cosPhi]]
-    // V = [[cosTheta, -sinTheta], [sinTheta, cosTheta]]
-    // R = U * diag(d) * V^T
-    const u00 = cosPhi, u01 = -sinPhi, u10 = sinPhi, u11 = cosPhi;
-    const v00 = cosTheta, v01 = sinTheta, v10 = -sinTheta, v11 = cosTheta;
-    // diag(d) * V^T
-    const dv00 = d0 * v00, dv01 = d0 * v01;
-    const dv10 = d1 * v10, dv11 = d1 * v11;
-    // R = U * (diag(d) * V^T)
-    const r00 = u00 * dv00 + u01 * dv10;
-    const r01 = u00 * dv01 + u01 * dv11;
-    const r10 = u10 * dv00 + u11 * dv10;
-    const r11 = u10 * dv01 + u11 * dv11;
+    const r00 = numCos / hypot;
+    const r01 = -numSin / hypot;
+    const r10 = numSin / hypot;
+    const r11 = numCos / hypot;
+
+    const scale = hypot / srcVar;
 
     // M = scale * R, t = dstMean - M * srcMean
     const m00 = scale * r00;
@@ -123,7 +93,7 @@ export class ArcFaceRecognizer {
 
   /**
    * Warp-sample frame into aligned 112x112 using similarity transform matrix.
-   * Returns BGR-ordered (1, 3, 112, 112) float32 NCHW tensor normalized by (pixel - 127.5) / 127.5.
+   * Returns RGB-ordered (1, 3, 112, 112) float32 NCHW tensor normalized by (pixel - 127.5) / 127.5.
    */
   public alignAndPreprocess(
     frame: FrameData,
@@ -162,15 +132,15 @@ export class ArcFaceRecognizer {
         const syi = Math.min(frame.height - 1, Math.max(0, Math.round(sy)));
         const srcIdx = (syi * frame.width + sxi) * channels;
 
-        // Input is RGB(A), ArcFace expects BGR channel order with (pixel - 127.5) / 127.5
+        // Input is RGB(A), ArcFace expects RGB channel order with (pixel - 127.5) / 127.5
         const r = ((frame.data[srcIdx] ?? 0) - 127.5) / 127.5;
         const g = ((frame.data[srcIdx + 1] ?? 0) - 127.5) / 127.5;
         const b = ((frame.data[srcIdx + 2] ?? 0) - 127.5) / 127.5;
 
         const spatialIdx = dy * this.inputSize + dx;
-        tensor[spatialIdx] = b;                  // B channel (plane 0)
+        tensor[spatialIdx] = r;                  // R channel (plane 0)
         tensor[planeSize + spatialIdx] = g;     // G channel (plane 1)
-        tensor[planeSize * 2 + spatialIdx] = r; // R channel (plane 2)
+        tensor[planeSize * 2 + spatialIdx] = b; // B channel (plane 2)
       }
     }
     return tensor;
@@ -178,7 +148,7 @@ export class ArcFaceRecognizer {
 
   /**
    * Crop face bounding box and convert to (1, 3, 112, 112) float32 NCHW tensor
-   * Normalization: (pixel - 127.5) / 127.5, BGR channel order
+   * Normalization: (pixel - 127.5) / 127.5, RGB channel order
    */
   public cropAndPreprocess(frame: FrameData, bbox: BoundingBox): Float32Array {
     const [x1, y1, x2, y2] = bbox.map(Math.round);
@@ -197,15 +167,15 @@ export class ArcFaceRecognizer {
         const sy = Math.min(frame.height - 1, Math.max(0, y1 + Math.floor((dy / this.inputSize) * cropH)));
         const srcIdx = (sy * frame.width + sx) * channels;
 
-        // Input is RGB(A), ArcFace expects BGR channel order
+        // Input is RGB(A), ArcFace expects RGB channel order
         const r = ((frame.data[srcIdx] ?? 0) - 127.5) / 127.5;
         const g = ((frame.data[srcIdx + 1] ?? 0) - 127.5) / 127.5;
         const b = ((frame.data[srcIdx + 2] ?? 0) - 127.5) / 127.5;
 
         const spatialIdx = dy * this.inputSize + dx;
-        tensor[spatialIdx] = b;                  // B channel (plane 0)
+        tensor[spatialIdx] = r;                  // R channel (plane 0)
         tensor[planeSize + spatialIdx] = g;     // G channel (plane 1)
-        tensor[planeSize * 2 + spatialIdx] = r; // R channel (plane 2)
+        tensor[planeSize * 2 + spatialIdx] = b; // B channel (plane 2)
       }
     }
     return tensor;
