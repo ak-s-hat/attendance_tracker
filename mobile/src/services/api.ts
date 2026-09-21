@@ -512,7 +512,7 @@ export async function enrollEmployeeFace(
     headers: {
       ...getAuthHeaders(token),
     },
-    timeout: 15000,
+    timeout: 45000,
   });
   return response.data;
 }
@@ -550,7 +550,7 @@ export async function postImageCheckin(
     headers: {
       ...getAuthHeaders(),
     },
-    timeout: 15000,
+    timeout: 45000,
   });
 
   return response.data;

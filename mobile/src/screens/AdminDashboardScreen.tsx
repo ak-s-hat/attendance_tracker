@@ -223,7 +223,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
               );
             }
           } catch (e: any) {
-            Alert.alert('Enrollment Error', e?.response?.data?.detail || 'Failed to update face biometric.');
+            Alert.alert('Enrollment Error', e?.response?.data?.detail || e?.message || 'Failed to update face biometric.');
           } finally {
             setTargetEmployeeForFaceUpdate(null);
           }

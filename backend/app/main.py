@@ -94,6 +94,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Startup health check warning: %s", e)
 
+    # Pre-warm AI models so first face check-in / enrollment is instant
+    try:
+        pipeline.load_models()
+        logger.info("✅ AI models pre-warmed and ready")
+    except Exception as e:
+        logger.warning("AI model pre-warm notice: %s", e)
+
     yield
 
 

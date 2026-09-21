@@ -21,8 +21,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy app source
 COPY . .
 
-# Models are mounted as a volume (not copied) — see docker-compose.yml
-# This keeps the image small (~300MB models stay on host)
+# Pre-download lightweight buffalo_sc models (~14MB) during docker build
+# so the container NEVER downloads model weights at runtime on cold starts
+RUN python -c "from insightface.app import FaceAnalysis; app = FaceAnalysis(name='buffalo_sc', allowed_modules=['detection', 'recognition']); app.prepare(ctx_id=-1, det_size=(320, 320))"
+
 
 EXPOSE 8000
 
