@@ -9,6 +9,9 @@ import { initEdgeSyncService, runFullSyncCycle, subscribeSyncEvents, forceSyncAl
 import { vectorGallery } from '../ai/vectorMatcher';
 import { getOfflineDbStats, enqueueOfflineScan } from '../database/offlineDb';
 import { decodeJpegBase64 } from '../services/imageDecoder';
+import { ScanTrace, log, errorToData } from '../services/logger';
+import { isDebugDumpEnabled, setDebugDumpEnabled, clearDebugDumps } from '../services/debugDump';
+import { uploadPendingLogs } from '../services/logUploader';
 
 export interface CameraKioskProps {
   pipeline?: EdgeAIPipeline;
@@ -41,6 +44,21 @@ export const CameraKiosk: React.FC<CameraKioskProps> = ({
   const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [debugDumpOn, setDebugDumpOn] = useState<boolean>(isDebugDumpEnabled());
+  const [logFeedback, setLogFeedback] = useState<string | null>(null);
+
+  const toggleDebugDump = useCallback(() => {
+    const next = !isDebugDumpEnabled();
+    setDebugDumpEnabled(next);
+    setDebugDumpOn(next);
+  }, []);
+
+  const handleUploadLogs = useCallback(async () => {
+    setLogFeedback('Uploading logs...');
+    const n = await uploadPendingLogs(apiBaseUrl);
+    setLogFeedback(n > 0 ? `✅ Uploaded ${n} log entries` : 'Nothing uploaded (no new logs, or server unreachable)');
+    setTimeout(() => setLogFeedback(null), 6000);
+  }, [apiBaseUrl]);
 
   const isEdgeMode = !!pipeline?.isEdgeMode?.();
   const diagnostics = pipeline?.getEngineDiagnostics?.();
@@ -64,6 +82,7 @@ export const CameraKiosk: React.FC<CameraKioskProps> = ({
     setSyncFeedback(`Connecting to ${apiBaseUrl}...`);
     try {
       const res = await forceSyncAll(apiBaseUrl);
+      log.info('SYNC', 'Manual sync finished', { ...res });
       if (res.error) {
         setSyncFeedback(`❌ Sync failed: ${res.error}`);
         setTimeout(() => setSyncFeedback(null), 8000);
@@ -74,6 +93,7 @@ export const CameraKiosk: React.FC<CameraKioskProps> = ({
         setTimeout(() => setSyncFeedback(null), 5000);
       }
     } catch (err: any) {
+      log.error('SYNC', 'Manual sync threw', errorToData(err));
       setSyncFeedback(`❌ Sync error: ${err?.message || 'Server unreachable'}`);
       setTimeout(() => setSyncFeedback(null), 8000);
     } finally {
@@ -98,14 +118,18 @@ export const CameraKiosk: React.FC<CameraKioskProps> = ({
   }, [initialResult, initialStatus]);
 
   const processCapturedFrame = useCallback(
-    async (frame: FrameData) => {
-      if (isProcessingRef.current || !pipeline) return;
+    async (frame: FrameData, trace?: ScanTrace) => {
+      if (isProcessingRef.current || !pipeline) {
+        trace?.end('skipped_busy', 'debug');
+        return;
+      }
       isProcessingRef.current = true;
       setStatus('scanning');
 
       try {
-        const res = await pipeline.processFrame(frame, apiBaseUrl);
+        const res = await pipeline.processFrame(frame, apiBaseUrl, undefined, trace);
         setResult(res);
+        trace?.end(res.success ? 'matched' : (res.reason || 'failed'), res.success ? 'info' : 'warn');
 
         if (!res.success) {
           if (res.reason === 'spoof_detected' || res.is_live === false) {
@@ -133,7 +157,8 @@ export const CameraKiosk: React.FC<CameraKioskProps> = ({
           onCheckinComplete(res);
         }
       } catch (err) {
-        console.error('Frame processing failed:', err);
+        trace?.set('error', errorToData(err));
+        trace?.end('pipeline_exception', 'error');
         lastErrorTimeRef.current = Date.now();
         setStatus('error');
       } finally {
@@ -155,10 +180,18 @@ export const CameraKiosk: React.FC<CameraKioskProps> = ({
       return;
     }
 
+    const trace = new ScanTrace();
     try {
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.5,
         base64: true,
+      });
+      trace.mark('capture');
+      trace.set('capture', {
+        photo_width: photo?.width,
+        photo_height: photo?.height,
+        base64_chars: photo?.base64?.length ?? 0,
+        auto: autoCaptureEnabled,
       });
 
       if (photo && (photo.uri || photo.base64)) {
@@ -174,6 +207,7 @@ export const CameraKiosk: React.FC<CameraKioskProps> = ({
             decodedHeight = decoded.height;
           }
         }
+        trace.mark('decode');
 
         if (decodedWidth && decodedHeight) {
           setFrameDimensions({ width: decodedWidth, height: decodedHeight });
@@ -186,13 +220,16 @@ export const CameraKiosk: React.FC<CameraKioskProps> = ({
           uri: photo.uri,
         };
 
-        await processCapturedFrame(frame);
+        await processCapturedFrame(frame, trace);
+      } else {
+        trace.end('no_photo_returned', 'warn');
       }
     } catch (e) {
-      console.warn('Frame capture attempt failed:', e);
+      trace.set('error', errorToData(e));
+      trace.end('capture_failed', 'error');
       isProcessingRef.current = false;
     }
-  }, [status, processCapturedFrame]);
+  }, [status, processCapturedFrame, autoCaptureEnabled]);
 
   // Frame Capture Interval (3.0 seconds when idle and autoCaptureEnabled)
   useEffect(() => {
@@ -539,6 +576,36 @@ export const CameraKiosk: React.FC<CameraKioskProps> = ({
             {syncFeedback && (
               <Text style={styles.syncFeedbackText}>{syncFeedback}</Text>
             )}
+
+            {/* Diagnostics: per-scan artifact dump + log upload */}
+            <TouchableOpacity
+              testID="debug-dump-toggle"
+              style={[styles.modalSyncBtn, debugDumpOn && styles.debugOn]}
+              onPress={toggleDebugDump}
+            >
+              <Text style={styles.modalSyncBtnText}>
+                {debugDumpOn ? '🐞 Debug dump: ON (saving model inputs)' : '🐞 Debug dump: OFF'}
+              </Text>
+            </TouchableOpacity>
+
+            <View style={styles.debugRow}>
+              <TouchableOpacity testID="upload-logs-button" style={styles.debugSmallBtn} onPress={handleUploadLogs}>
+                <Text style={styles.modalSyncBtnText}>⬆️ Upload logs</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="clear-dumps-button"
+                style={styles.debugSmallBtn}
+                onPress={() => {
+                  clearDebugDumps();
+                  setLogFeedback('Cleared saved debug scans');
+                  setTimeout(() => setLogFeedback(null), 4000);
+                }}
+              >
+                <Text style={styles.modalSyncBtnText}>🗑 Clear dumps</Text>
+              </TouchableOpacity>
+            </View>
+
+            {logFeedback && <Text style={styles.syncFeedbackText}>{logFeedback}</Text>}
 
             <TouchableOpacity
               testID="close-diagnostics-button"
@@ -906,6 +973,24 @@ const styles = StyleSheet.create({
     color: '#E0E7FF',
     fontSize: 12,
     textAlign: 'center',
+  },
+  debugOn: {
+    backgroundColor: 'rgba(245, 158, 11, 0.25)',
+    borderColor: colors.warning,
+  },
+  debugRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  debugSmallBtn: {
+    flex: 1,
+    marginTop: 8,
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+    borderRadius: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
   },
   modalCloseBtn: {
     marginTop: 12,

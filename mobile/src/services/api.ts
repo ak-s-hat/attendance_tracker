@@ -1,4 +1,57 @@
-import axios from 'axios';
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { log } from './logger';
+
+// ---------------------------------------------------------------------------
+// Request tracing: every API call is logged with method, path, status, duration
+// and the axios error code (ECONNABORTED = timeout, ERR_NETWORK = unreachable).
+// The client-logs upload itself is excluded so it can't feed back into the log.
+// ---------------------------------------------------------------------------
+const UNTRACED_PATHS = ['/api/client-logs'];
+
+function describeRequest(config?: InternalAxiosRequestConfig) {
+  const url = config?.url || '';
+  let path = url;
+  try {
+    path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
+  } catch (_) {}
+  return { method: (config?.method || 'get').toUpperCase(), path };
+}
+
+axios.interceptors?.request?.use?.((config) => {
+  (config as any).__startedAt = Date.now();
+  return config;
+});
+
+axios.interceptors?.response?.use?.(
+  (response) => {
+    const { method, path } = describeRequest(response.config);
+    if (!UNTRACED_PATHS.includes(path)) {
+      const ms = Date.now() - ((response.config as any).__startedAt || Date.now());
+      log.info('API', `${method} ${path} ${response.status} ${ms}ms`, { method, path, status: response.status, ms });
+    }
+    return response;
+  },
+  (error: AxiosError<any>) => {
+    const { method, path } = describeRequest(error.config);
+    if (!UNTRACED_PATHS.includes(path)) {
+      const ms = Date.now() - ((error.config as any)?.__startedAt || Date.now());
+      const status = error.response?.status;
+      log.warn('API', `${method} ${path} FAILED ${status ?? error.code ?? 'ERR'} ${ms}ms`, {
+        method,
+        path,
+        status,
+        code: error.code,
+        timeout_ms: error.config?.timeout,
+        ms,
+        detail: typeof error.response?.data?.detail === 'string'
+          ? error.response.data.detail.substring(0, 300)
+          : error.response?.data?.detail,
+        message: error.message,
+      });
+    }
+    return Promise.reject(error);
+  }
+);
 
 // ---------------------------------------------------------------------------
 // JWT Auth Token State Management
@@ -595,6 +648,34 @@ export async function fetchEmployeeEmbeddingsDelta(
     headers: getAuthHeaders(token),
     timeout: 12000,
   });
+  return response.data;
+}
+
+export interface ClientLogPayloadItem {
+  client_log_id: number;
+  ts: string;
+  level: string;
+  tag: string;
+  trace_id?: string | null;
+  message: string;
+  data?: any;
+}
+
+/**
+ * Upload a batch of app log entries (diagnostics trail) to the backend.
+ */
+export async function postClientLogs(
+  baseUrl: string,
+  deviceId: string,
+  appVersion: string,
+  logs: ClientLogPayloadItem[]
+): Promise<{ accepted: number }> {
+  const cleanBase = baseUrl.replace(/\/$/, '');
+  const response = await axios.post<{ accepted: number }>(
+    `${cleanBase}/api/client-logs`,
+    { device_id: deviceId, app_version: appVersion, logs },
+    { headers: { 'Content-Type': 'application/json' }, timeout: 20000 }
+  );
   return response.data;
 }
 

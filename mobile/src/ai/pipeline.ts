@@ -6,6 +6,8 @@ import { postEmbeddingCheckin, postImageCheckin } from '../services/api';
 import { vectorGallery } from './vectorMatcher';
 import { enqueueOfflineScan } from '../database/offlineDb';
 import { flushPendingAttendanceLogs } from '../services/syncService';
+import { ScanTrace, log, errorToData } from '../services/logger';
+import { dumpScanArtifacts, isDebugDumpEnabled } from '../services/debugDump';
 
 export class EdgeAIPipeline {
   private detector: SCRFDDetector | null = null;
@@ -36,7 +38,7 @@ export class EdgeAIPipeline {
       const loaded = await loadAllEdgeSessions();
       this.initialize(loaded.detSession, loaded.recSession, loaded.liveSession);
     } catch (err: any) {
-      console.warn('[EdgeAIPipeline] Auto model loading fallback:', err?.message || err);
+      log.error('APP', 'ONNX model loading failed -> server fallback mode', errorToData(err));
       this.initialize(null, null, null);
     }
   }
@@ -54,7 +56,56 @@ export class EdgeAIPipeline {
     }
   }
 
-  public async processFrame(frame: FrameData, overrideApiUrl?: string, deviceId = 'mobile_kiosk_01'): Promise<PipelineResult> {
+  /**
+   * Runs one scan. When a ScanTrace is passed, per-stage timings/scores are recorded on it and,
+   * if debug mode is on, the exact model inputs are dumped to disk for offline comparison.
+   */
+  public async processFrame(
+    frame: FrameData,
+    overrideApiUrl?: string,
+    deviceId = 'mobile_kiosk_01',
+    trace?: ScanTrace
+  ): Promise<PipelineResult> {
+    trace?.set('frame', { width: frame.width, height: frame.height, bytes: frame.data?.length ?? 0 });
+    const result = await this.processFrameInner(frame, overrideApiUrl, deviceId, trace);
+    if (trace) {
+      trace.set('result', {
+        success: result.success,
+        reason: result.reason,
+        execution_mode: result.executionMode,
+        employee_id: result.employee_id,
+        employee_name: result.employee_name,
+        confidence: result.confidence,
+        check_type: result.check_type,
+        error: result.errorMessage,
+      });
+      if (isDebugDumpEnabled()) {
+        await dumpScanArtifacts({
+          traceId: trace.id,
+          frameUri: frame.uri,
+          tensors: [
+            { name: 'det_input_640', tensor: this.detector?.lastInputTensor, size: 640, layout: { order: 'RGB', mean: 127.5, std: 128.0 } },
+            { name: 'liveness_input_80', tensor: this.liveness?.lastInputTensor, size: 80, layout: { order: 'BGR', mean: 0, std: 1 } },
+            { name: 'rec_input_112', tensor: this.recognizer?.lastInputTensor, size: 112, layout: { order: 'RGB', mean: 127.5, std: 127.5 } },
+          ],
+          trace: { trace_id: trace.id, timings_ms: trace.timings, ...trace.data },
+        });
+        trace.mark('debug_dump');
+      }
+      // Clear so a later failed scan can't dump a stale tensor from a previous one
+      if (this.detector) this.detector.lastInputTensor = null;
+      if (this.liveness) this.liveness.lastInputTensor = null;
+      if (this.recognizer) this.recognizer.lastInputTensor = null;
+    }
+    return result;
+  }
+
+  private async processFrameInner(
+    frame: FrameData,
+    overrideApiUrl: string | undefined,
+    deviceId: string,
+    trace?: ScanTrace
+  ): Promise<PipelineResult> {
     const startTime = Date.now();
     const timestamp = new Date().toISOString();
     const targetUrl = overrideApiUrl || this.apiBaseUrl;
@@ -65,9 +116,12 @@ export class EdgeAIPipeline {
 
     // Expo Go Managed Fallback Mode: if ONNX native C++ session is null, delegate to server checkin
     if (!this.detector.hasSession()) {
+      trace?.set('execution_mode', 'SERVER_FALLBACK');
       try {
         const imagePayload = frame.uri || frame.data;
         const resData = await postImageCheckin(targetUrl, imagePayload, deviceId);
+        trace?.mark('server_checkin');
+        trace?.set('server', { reason: resData.reason, debug: resData.debug_metadata });
         const inferenceLatencyMs = Date.now() - startTime;
         if (resData.success) {
           return {
@@ -94,7 +148,7 @@ export class EdgeAIPipeline {
           };
         }
       } catch (e: any) {
-        console.warn('[EdgeAIPipeline] Server fallback failed:', e?.message || e, 'URL:', targetUrl);
+        log.warn('SCAN', 'Server fallback check-in failed', { url: targetUrl, ...errorToData(e) }, trace?.id);
         return {
           success: false,
           reason: 'network_or_server_error',
@@ -112,6 +166,15 @@ export class EdgeAIPipeline {
     try {
       // Step 1: Face Detection
       detResult = await this.detector.detect(frame);
+      trace?.mark('det');
+      trace?.set('det', {
+        success: detResult.success,
+        reason: detResult.reason,
+        score: detResult.detScore,
+        faces_after_nms: this.detector.lastCandidateCount,
+        bbox: detResult.bbox?.map((v: number) => Math.round(v)),
+        landmarks: detResult.landmarks?.map((p: any) => [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10]),
+      });
       if (!detResult.success || !detResult.bbox) {
         return {
           success: false,
@@ -124,6 +187,14 @@ export class EdgeAIPipeline {
 
       // Step 2: Anti-Spoofing Liveness Check
       livenessResult = await this.liveness.check(frame, detResult.bbox);
+      trace?.mark('liveness');
+      trace?.set('liveness', {
+        score: livenessResult.score,
+        is_live: livenessResult.isLive,
+        note: livenessResult.note,
+        logits: this.liveness.lastLogits,
+        crop_box: this.liveness.lastExpandedBox?.map((v: number) => Math.round(v)),
+      });
       if (!livenessResult.isLive) {
         return {
           success: false,
@@ -139,12 +210,14 @@ export class EdgeAIPipeline {
       // Step 3: Compute 512-d ArcFace Face Embedding with 5-point landmark alignment
       const embeddingTensor = await this.recognizer.getEmbedding(frame, detResult.bbox, detResult.landmarks);
       embeddingArray = Array.from(embeddingTensor);
+      trace?.mark('rec');
+      trace?.set('rec', { align_mode: this.recognizer.lastAlignMode });
     } catch (onnxErr: any) {
-      console.warn('[EdgeAIPipeline] On-device ONNX inference failed:', onnxErr?.message || onnxErr);
+      log.error('SCAN', 'On-device ONNX inference failed', errorToData(onnxErr), trace?.id);
       
       // If frame image URI and server URL exist, gracefully fallback to server check-in
       if (frame.uri && targetUrl) {
-        console.log('[EdgeAIPipeline] Falling back to server image check-in after local ONNX failure...');
+        log.warn('SCAN', 'Falling back to server image check-in after local ONNX failure', null, trace?.id);
         try {
           const resData = await postImageCheckin(targetUrl, frame.uri, deviceId);
           return {
@@ -173,7 +246,16 @@ export class EdgeAIPipeline {
 
     // Step 4: Autonomous On-Device Vector Matching via InMemVectorGallery
     if (vectorGallery.getGallerySize() > 0) {
-      const match = vectorGallery.searchBestMatch(embeddingArray, 0.65);
+      const MATCH_THRESHOLD = 0.65;
+      const top = vectorGallery.searchTopK(embeddingArray, 2);
+      const match = top.length > 0 && top[0].similarity >= MATCH_THRESHOLD ? top[0] : null;
+      trace?.mark('match');
+      trace?.set('match', {
+        gallery_size: vectorGallery.getGallerySize(),
+        threshold: MATCH_THRESHOLD,
+        top: top.map((m) => ({ id: m.employee.id, name: m.employee.name, sim: m.similarity })),
+        margin: top.length > 1 ? Math.round((top[0].similarity - top[1].similarity) * 1000) / 1000 : null,
+      });
       if (match) {
         // Enqueue punch into local SQLite queue for async cloud sync (zero punch latency)
         try {
@@ -186,13 +268,14 @@ export class EdgeAIPipeline {
             confidence_score: match.similarity,
             liveness_score: livenessResult.score,
           });
+          trace?.mark('enqueue');
 
           // Non-blocking background flush to Render cloud database if online
           flushPendingAttendanceLogs(targetUrl).catch((syncErr) =>
             console.log('[EdgeAIPipeline] Background punch flush notice (offline or deferred):', syncErr?.message || syncErr)
           );
         } catch (dbErr) {
-          console.warn('[EdgeAIPipeline] Failed to enqueue offline scan:', dbErr);
+          log.error('DB', 'Failed to enqueue offline scan', errorToData(dbErr), trace?.id);
         }
 
         return {
@@ -226,6 +309,7 @@ export class EdgeAIPipeline {
     }
 
     // Step 4b: Fallback mode if local gallery has not yet been populated
+    trace?.set('match', { gallery_size: 0, note: 'empty local gallery -> server /checkin/embedding' });
     try {
       const resData = await postEmbeddingCheckin(targetUrl, {
         embedding: embeddingArray,

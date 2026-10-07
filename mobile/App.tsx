@@ -8,6 +8,8 @@ import { KioskScreen } from './src/screens/KioskScreen';
 import { ManagerDashboardScreen } from './src/screens/ManagerDashboardScreen';
 import { colors } from './src/theme/colors';
 import { syncEmployeeEmbeddingsDelta } from './src/services/syncService';
+import { log, errorToData, flushLogsToDb, APP_VERSION } from './src/services/logger';
+import { startLogUploader } from './src/services/logUploader';
 
 export type AppMode = 'KIOSK' | 'ADMIN';
 
@@ -29,27 +31,44 @@ const DEFAULT_API_URL =
   'https://attendance-tracker-backend-yfoc.onrender.com';
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Global JS error handlers — catch unhandled exceptions & promise rejections
-// and show them as alerts instead of silently crashing the app
+// Global JS error handlers — every unhandled exception & promise rejection is
+// written to the log trail (console + SQLite + backend upload). Only fatal errors
+// raise an Alert, so non-fatal noise can't stack dialogs on an unattended kiosk.
 // ──────────────────────────────────────────────────────────────────────────────
 const originalHandler = ErrorUtils.getGlobalHandler();
 ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {
-  const msg = `[${isFatal ? 'FATAL' : 'NON-FATAL'}] ${error?.message || error}\n\nStack: ${error?.stack?.substring(0, 500) || 'N/A'}`;
-  console.error('[GlobalErrorHandler]', msg);
-  try {
-    Alert.alert(
-      isFatal ? '🔴 Fatal JS Error' : '⚠️ JS Error',
-      msg,
-      [{ text: 'OK' }]
-    );
-  } catch (_) {
-    // Alert itself might fail if the app is in a bad state
+  log.error('CRASH', isFatal ? 'Fatal JS error' : 'Unhandled JS error', { fatal: !!isFatal, ...errorToData(error) });
+  flushLogsToDb().catch(() => {});
+  if (isFatal) {
+    try {
+      Alert.alert(
+        '🔴 Fatal JS Error',
+        `${error?.message || error}\n\nStack: ${error?.stack?.substring(0, 500) || 'N/A'}`,
+        [{ text: 'OK' }]
+      );
+    } catch (_) {
+      // Alert itself might fail if the app is in a bad state
+    }
   }
   // Still call the original handler so React Native can do its thing
   if (originalHandler) {
     originalHandler(error, isFatal);
   }
 });
+
+const hermes = (global as any).HermesInternal;
+if (hermes?.enablePromiseRejectionTracker) {
+  hermes.enablePromiseRejectionTracker({
+    allRejections: true,
+    onUnhandled: (id: number, rejection: any) => {
+      log.warn('CRASH', 'Unhandled promise rejection', { id, ...errorToData(rejection) });
+    },
+    onHandled: () => {},
+  });
+}
+
+log.info('APP', 'App started', { version: APP_VERSION, api: DEFAULT_API_URL, dev: __DEV__ });
+startLogUploader(DEFAULT_API_URL);
 
 // Suppress noisy yellow-box warnings in dev builds but keep errors
 LogBox.ignoreLogs(['Warning:']);
@@ -77,6 +96,8 @@ function AppInner({ initialSession = null, initialMode = 'KIOSK' }: AppProps) {
 
   const handleServerUrlChange = (url: string) => {
     setApiBaseUrl(url);
+    startLogUploader(url);
+    log.info('APP', 'Server URL changed', { api: url });
   };
 
   // If unauthenticated, display Login Screen

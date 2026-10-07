@@ -81,9 +81,114 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       error_message TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS app_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT NOT NULL,
+      level TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      trace_id TEXT,
+      message TEXT NOT NULL,
+      data_json TEXT,
+      uploaded INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS kv_meta (
+      key TEXT PRIMARY KEY NOT NULL,
+      value TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_cached_emp_name ON cached_employees(name);
     CREATE INDEX IF NOT EXISTS idx_offline_queue_status ON offline_attendance_queue(status);
+    CREATE INDEX IF NOT EXISTS idx_app_logs_uploaded ON app_logs(uploaded, id);
   `);
+}
+
+// ---------------------------------------------------------------------------
+// Key/value metadata (device id, sync watermarks, ...)
+// ---------------------------------------------------------------------------
+export async function getMeta(key: string): Promise<string | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ value: string }>('SELECT value FROM kv_meta WHERE key = ?', [String(key)]);
+  return row?.value ?? null;
+}
+
+export async function setMeta(key: string, value: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('INSERT OR REPLACE INTO kv_meta (key, value) VALUES (?, ?)', [String(key), String(value)]);
+}
+
+let cachedDeviceId: string | null = null;
+
+/** Stable per-install device id, used to attribute scans and logs (multi-site ready). */
+export async function getDeviceId(): Promise<string> {
+  if (cachedDeviceId) return cachedDeviceId;
+  let id = await getMeta('device_id');
+  if (!id) {
+    id = `dev_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 10)}`;
+    await setMeta('device_id', id);
+  }
+  cachedDeviceId = id;
+  return id;
+}
+
+// ---------------------------------------------------------------------------
+// App log ring buffer (written by services/logger.ts)
+// ---------------------------------------------------------------------------
+const APP_LOG_KEEP_ROWS = 5000;
+
+export interface AppLogRow {
+  id: number;
+  ts: string;
+  level: string;
+  tag: string;
+  trace_id: string | null;
+  message: string;
+  data_json: string | null;
+}
+
+export async function insertAppLogs(
+  entries: { ts: string; level: string; tag: string; message: string; trace_id?: string | null; data_json?: string | null }[]
+): Promise<void> {
+  if (entries.length === 0) return;
+  const db = await getDb();
+  for (const e of entries) {
+    await db.runAsync(
+      'INSERT INTO app_logs (ts, level, tag, trace_id, message, data_json) VALUES (?, ?, ?, ?, ?, ?)',
+      [
+        String(e.ts),
+        String(e.level),
+        String(e.tag),
+        String(e.trace_id || ''),
+        String(e.message),
+        String(e.data_json || ''),
+      ]
+    );
+  }
+  await db.runAsync(
+    'DELETE FROM app_logs WHERE id <= (SELECT MAX(id) FROM app_logs) - ?',
+    [APP_LOG_KEEP_ROWS]
+  );
+}
+
+export async function getUnuploadedAppLogs(limit = 300): Promise<AppLogRow[]> {
+  const db = await getDb();
+  return db.getAllAsync<AppLogRow>(
+    'SELECT id, ts, level, tag, trace_id, message, data_json FROM app_logs WHERE uploaded = 0 ORDER BY id ASC LIMIT ?',
+    [Number(limit)]
+  );
+}
+
+export async function markAppLogsUploaded(maxId: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE app_logs SET uploaded = 1 WHERE uploaded = 0 AND id <= ?', [Number(maxId)]);
+}
+
+export async function getRecentAppLogs(limit = 2000): Promise<AppLogRow[]> {
+  const db = await getDb();
+  return db.getAllAsync<AppLogRow>(
+    'SELECT id, ts, level, tag, trace_id, message, data_json FROM app_logs ORDER BY id DESC LIMIT ?',
+    [Number(limit)]
+  );
 }
 
 /**

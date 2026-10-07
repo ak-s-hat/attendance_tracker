@@ -6,6 +6,11 @@ export class MiniFASNetLiveness {
   private readonly inputSize = 80;
   private readonly threshold: number = 0.5;
 
+  /** Last model input / crop, kept for debug dumps and scan traces. */
+  public lastInputTensor: Float32Array | null = null;
+  public lastExpandedBox: BoundingBox | null = null;
+  public lastLogits: number[] | null = null;
+
   constructor(session: any = null, threshold: number = 0.5) {
     this.session = session;
     this.threshold = threshold;
@@ -125,6 +130,8 @@ export class MiniFASNetLiveness {
     // MiniFASNetV2 requires 2.7x expanded context crop for accurate spatial feature analysis
     const expandedBox = this.expandBoundingBox(bbox, frame.width, frame.height, 2.7);
     const inputTensor = this.preprocess(frame, expandedBox);
+    this.lastInputTensor = inputTensor;
+    this.lastExpandedBox = expandedBox;
 
     const inputName = this.session.inputNames ? this.session.inputNames[0] : 'data';
     const feeds: Record<string, any> = {};
@@ -133,6 +140,7 @@ export class MiniFASNetLiveness {
     const outputs = await this.session.run(feeds);
     const outputName = this.session.outputNames ? this.session.outputNames[0] : Object.keys(outputs)[0];
     const logits: Float32Array = outputs[outputName].data;
+    this.lastLogits = Array.from(logits);
 
     // Stable softmax: logits[0] = spoof score, logits[1] = real score
     const probs = this.softmax(logits);

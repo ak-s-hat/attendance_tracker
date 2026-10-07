@@ -106,6 +106,25 @@ INSERT INTO users (username, password_hash, role, is_active)
 SELECT 'admin', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'super_admin', true
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin');
 
+-- 10. Device diagnostics log trail (uploaded by kiosks via POST /api/client-logs, 14-day retention)
+CREATE TABLE IF NOT EXISTS client_logs (
+    id BIGSERIAL PRIMARY KEY,
+    device_id VARCHAR(100) NOT NULL,
+    app_version VARCHAR(30),
+    client_log_id INTEGER NOT NULL,
+    ts TIMESTAMPTZ NOT NULL,
+    level VARCHAR(10) NOT NULL,
+    tag VARCHAR(20) NOT NULL,
+    trace_id VARCHAR(64),
+    message TEXT NOT NULL,
+    data JSONB,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_client_logs_device_entry UNIQUE (device_id, client_log_id)
+);
+CREATE INDEX IF NOT EXISTS ix_client_logs_device_ts ON client_logs(device_id, ts);
+CREATE INDEX IF NOT EXISTS ix_client_logs_tag ON client_logs(tag);
+CREATE INDEX IF NOT EXISTS ix_client_logs_trace_id ON client_logs(trace_id);
+
 -- Verification query
 SELECT 'Supabase Schema Initialized Successfully!' AS status,
        (SELECT COUNT(*) FROM system_settings) AS settings_count,

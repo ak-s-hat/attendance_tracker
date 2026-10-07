@@ -31,20 +31,32 @@
       },
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.INTERNET",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.INTERNET"
       ],
-      "usesCleartextTraffic": true
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Attendance Tracker to access your camera for kiosk check-in facial detection."
+          "cameraPermission": "Allow Attendance Tracker to access your camera for kiosk check-in facial detection.",
+          "recordAudioAndroid": false
         }
       ],
       "onnxruntime-react-native",
-      "./plugins/withPackagingOptions"
+      "./plugins/withPackagingOptions",
+      "expo-secure-store",
+      "expo-sqlite",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "web": {
       "favicon": "./assets/icon.png"

@@ -10,6 +10,11 @@ export class SCRFDDetector {
   private readonly strides = [8, 16, 32];
   private readonly numAnchors = 2;
 
+  /** Last model input and raw candidate count, kept for debug dumps / scan traces. */
+  public lastInputTensor: Float32Array | null = null;
+  public lastCandidateCount = 0;
+  public readonly inputSize = 640;
+
   constructor(session: any, detThreshold: number = 0.7, nmsThreshold: number = 0.4) {
     this.session = session;
     this.detThreshold = detThreshold;
@@ -110,6 +115,7 @@ export class SCRFDDetector {
     }
 
     const inputTensor = this.preprocess(frame);
+    this.lastInputTensor = inputTensor;
     const inputName = this.session.inputNames ? this.session.inputNames[0] : 'input.1';
 
     const feeds: Record<string, any> = {};
@@ -136,6 +142,7 @@ export class SCRFDDetector {
     }
 
     const keepIndices = this.nms(filteredBoxes, filteredScores, this.nmsThreshold);
+    this.lastCandidateCount = keepIndices.length;
 
     if (keepIndices.length === 0) {
       return { success: false, reason: 'no_face_detected' };

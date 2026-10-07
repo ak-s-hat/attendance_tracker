@@ -1,5 +1,6 @@
 import { NativeModules, Platform } from 'react-native';
 import { Asset } from 'expo-asset';
+import { log, errorToData } from './logger';
 
 export interface LoadedEdgeSessions {
   detSession: any | null;
@@ -50,12 +51,16 @@ export function isNativeOrtAvailable(): boolean {
 export async function getLocalModelPath(assetModule: any): Promise<string> {
   const asset = Asset.fromModule(assetModule);
   if (!asset.localUri) {
-    // Add 10-second timeout to downloadAsync
+    // In a release APK the asset is embedded (fast). In a dev client it streams from Metro
+    // over Wi-Fi/USB (~50MB of models), so allow much longer before giving up.
+    const timeoutMs = __DEV__ ? 180000 : 10000;
+    const t0 = Date.now();
     const downloadPromise = asset.downloadAsync();
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Asset download timed out')), 10000)
+      setTimeout(() => reject(new Error(`Asset download timed out after ${timeoutMs}ms (${asset.name})`)), timeoutMs)
     );
     await Promise.race([downloadPromise, timeoutPromise]);
+    log.info('APP', `Model asset ready: ${asset.name}.${asset.type}`, { ms: Date.now() - t0, uri: asset.localUri });
   }
   return asset.localUri || asset.uri;
 }
@@ -174,12 +179,22 @@ export async function loadAllEdgeSessions(): Promise<LoadedEdgeSessions> {
     ]);
 
     // Load sequentially to minimize peak native C++ heap allocations
-    const detRes = await createHardwareAwareSession(detPath);
-    const recRes = await createHardwareAwareSession(recPath);
-    const liveRes = await createHardwareAwareSession(livePath);
+    const timed = async (name: string, path: string) => {
+      const t0 = Date.now();
+      const res = await createHardwareAwareSession(path);
+      log.info('APP', `ONNX session ready: ${name}`, {
+        ms: Date.now() - t0,
+        provider: res.provider,
+        inputs: res.session?.inputNames,
+        outputs: res.session?.outputNames,
+      });
+      return res;
+    };
+    const detRes = await timed('detector', detPath);
+    const recRes = await timed('recognizer', recPath);
+    const liveRes = await timed('liveness', livePath);
 
     const activeProvider = detRes.provider as any;
-    console.log(`[ONNXEngine] All 3 Edge models loaded successfully on [${activeProvider.toUpperCase()}] backend.`);
 
     diagnosticsState.hardwareProvider = activeProvider;
     diagnosticsState.detLoaded = true;
@@ -202,11 +217,10 @@ export async function loadAllEdgeSessions(): Promise<LoadedEdgeSessions> {
     diagnosticsState.liveLoaded = false;
     diagnosticsState.fallbackReason = diagnosticsState.fallbackReason || reason;
 
-    if (err?.message === 'NATIVE_ORT_UNAVAILABLE' || err?.message === 'MODEL_ASSETS_UNAVAILABLE') {
-      console.log('[ONNXEngine] Operating in managed mode (server delegate).');
-    } else {
-      console.warn('[ONNXEngine] Error loading edge ONNX models, falling back to server mode:', err?.message || err);
-    }
+    log.error('APP', 'Edge ONNX models not loaded -> SERVER FALLBACK mode', {
+      reason: diagnosticsState.fallbackReason,
+      ...errorToData(err),
+    });
     return {
       detSession: null,
       recSession: null,

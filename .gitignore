@@ -70,6 +70,9 @@ models/mobile_quantized/
 anti_spoof_lab/runs/
 runs/
 
+# Device diagnostics pulled by read_phone_logs.ps1 (may contain face images)
+/logs/
+
 # Docker volumes (if created on host)
 postgres_data/
 redis_data/

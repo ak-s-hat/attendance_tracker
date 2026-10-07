@@ -13,6 +13,7 @@ import {
   syncBatchAttendanceLogs,
   BatchSyncPayloadItem,
 } from './api';
+import { log, errorToData } from './logger';
 
 let isSyncing = false;
 let isFlushInProgress = false;
@@ -56,7 +57,7 @@ export async function initEdgeSyncService(apiBaseUrl?: string, authToken?: strin
   try {
     const localEmps = await getAllCachedEmployees();
     vectorGallery.loadGallery(localEmps);
-    console.log(`[EdgeSync] Preloaded ${vectorGallery.getGallerySize()} employee vectors from local SQLite.`);
+    log.info('SYNC', `Preloaded ${vectorGallery.getGallerySize()} employee vectors from local SQLite`);
     notifySyncListeners();
   } catch (err) {
     console.warn('[EdgeSync] Failed to preload local gallery:', err);
@@ -191,23 +192,27 @@ export async function flushPendingAttendanceLogs(apiBaseUrl: string, authToken?:
 
     try {
       const syncRes = await syncBatchAttendanceLogs(apiBaseUrl, 'kiosk-mobile-edge', payload, authToken);
+      log.info('SYNC', `Push: sent ${payload.length}, server confirmed ${syncRes.synced_ids?.length ?? 0}`, {
+        sent: payload.length,
+        confirmed: syncRes.synced_ids?.length ?? 0,
+        message: syncRes.message,
+      });
       if (syncRes.success && syncRes.synced_ids.length > 0) {
         await markScansAsSynced(syncRes.synced_ids);
         syncedCount = syncRes.synced_ids.length;
-        console.log(`[EdgeSync] Background flushed ${syncedCount} offline scans to cloud.`);
         notifySyncListeners();
       }
     } catch (pushErr: any) {
       if (pushErr?.response?.status && pushErr.response.status >= 400 && pushErr.response.status < 500) {
-        console.error('[EdgeSync] Background push rejected (4xx). Marking scans as failed:', pushErr?.response?.data || pushErr.message);
+        log.error('SYNC', `Push rejected (${pushErr.response.status}); marking ${pendingScans.length} scans FAILED`, errorToData(pushErr));
         await markScansAsFailed(pendingScans.map((s) => s.id), pushErr?.response?.data?.detail || '4xx error');
         notifySyncListeners();
       } else {
-        console.warn('[EdgeSync] flushPendingAttendanceLogs push failed:', pushErr?.message || pushErr);
+        log.warn('SYNC', `Push failed; ${pendingScans.length} scans stay PENDING`, errorToData(pushErr));
       }
     }
   } catch (err: any) {
-    console.warn('[EdgeSync] flushPendingAttendanceLogs failed:', err?.message || err);
+    log.warn('SYNC', 'flushPendingAttendanceLogs failed', errorToData(err));
   } finally {
     isFlushInProgress = false;
   }
@@ -222,9 +227,12 @@ export async function syncEmployeeEmbeddingsDelta(
   authToken?: string
 ): Promise<{ count: number; error?: string }> {
   try {
-    console.log(`[EdgeSync] Fetching employee embeddings delta from: ${apiBaseUrl}`);
     const deltas = await fetchEmployeeEmbeddingsDelta(apiBaseUrl, lastGallerySyncIso, authToken);
-    console.log(`[EdgeSync] Server returned ${deltas?.length || 0} employees.`);
+    log.info('SYNC', `Pull: server returned ${deltas?.length || 0} employees`, {
+      since: lastGallerySyncIso ?? null,
+      count: deltas?.length || 0,
+      without_embedding: (deltas || []).filter((d) => !d.embedding || d.embedding.length !== 512).length,
+    });
 
     if (deltas && deltas.length > 0) {
       await saveOrUpdateCachedEmployees(deltas);
@@ -244,7 +252,7 @@ export async function syncEmployeeEmbeddingsDelta(
     return { count: local.length };
   } catch (err: any) {
     const msg = err?.response?.data?.detail || err?.message || String(err);
-    console.warn('[EdgeSync] syncEmployeeEmbeddingsDelta failed:', msg);
+    log.warn('SYNC', 'Pull failed', errorToData(err));
     await notifySyncListeners();
     return { count: 0, error: msg };
   }

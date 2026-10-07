@@ -93,6 +93,31 @@ export class InMemVectorGallery {
     return null;
   }
 
+  /**
+   * Top-k matches regardless of threshold (for scan traces: shows the margin between
+   * the best and runner-up candidate).
+   */
+  public searchTopK(queryVector: number[] | Float32Array, k: number = 2): MatchResult[] {
+    if (this.count === 0 || queryVector.length !== this.dim) return [];
+
+    let qNorm = 0;
+    for (let d = 0; d < this.dim; d++) qNorm += queryVector[d] * queryVector[d];
+    qNorm = Math.sqrt(qNorm) || 1.0;
+
+    const scores: { i: number; s: number }[] = [];
+    for (let i = 0; i < this.count; i++) {
+      const offset = i * this.dim;
+      let dot = 0.0;
+      for (let d = 0; d < this.dim; d++) dot += this.flatVectors[offset + d] * queryVector[d];
+      scores.push({ i, s: dot / qNorm });
+    }
+    scores.sort((a, b) => b.s - a.s);
+    return scores.slice(0, k).map(({ i, s }) => ({
+      employee: this.employees[i],
+      similarity: Math.round(s * 1000) / 1000,
+    }));
+  }
+
   public getGallerySize(): number {
     return this.count;
   }

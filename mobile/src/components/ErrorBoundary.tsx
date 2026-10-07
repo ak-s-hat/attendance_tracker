@@ -1,5 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity } from 'react-native';
+import { log, errorToData } from '../services/logger';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -35,7 +36,10 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       `Component Stack: ${info.componentStack || 'N/A'}`,
     ].join('\n\n');
     this.setState({ errorInfo });
-    console.error('[ErrorBoundary]', errorInfo);
+    log.error('CRASH', `Render crash in ${this.props.label || 'App'}`, {
+      ...errorToData(error),
+      componentStack: (info.componentStack || '').substring(0, 1000),
+    });
   }
 
   render() {

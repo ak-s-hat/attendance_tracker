@@ -503,12 +503,40 @@ mobile/
   ```
   **Rule**: All parameters passed to `db.runAsync` or `takePictureAsync` must be explicitly sanitized to primitive strings or numbers (`String(val || '')`, `Number(val) || 0.0`).
 
-### Live Logcat Streaming Tool
-To stream live edge inference logs from any connected Android phone to your PC terminal:
+### Dev Loop & Diagnostics (no rebuild per fix)
+
+**One-time:** build and install the development client (includes `expo-dev-client`, `expo-image-manipulator`, `expo-secure-store`):
 ```powershell
-.\read_phone_logs.ps1
+cd d:\ML\attendance_tracker\mobile
+npx eas build --profile development --platform android
 ```
-This runs a continuous ADB stream filtering for `ReactNativeJS:V` and `AndroidRuntime:E` so you can monitor detection latency, liveness scores, and sync operations in real time.
+Rebuild only when native code changes (new native module, config plugin, permission, ORT version).
+
+**Daily loop:** JS/TS and `.onnx` asset edits hot-reload onto the phone:
+```powershell
+d:\ML\platform-tools\adb.exe reverse tcp:8081 tcp:8081   # phone on USB (or same Wi-Fi)
+npx expo start --dev-client                              # press j for React Native DevTools
+npx expo start --dev-client --no-dev --minify            # use this mode for performance numbers
+```
+In dev mode the ~50 MB of models stream from Metro on first load (timeout raised to 180 s).
+
+**Log trail:** `mobile/src/services/logger.ts` writes every entry to the console (Metro and logcat) and to the SQLite `app_logs` ring buffer (last 5k rows). `logUploader.ts` ships the buffer every 60 s to `POST /api/client-logs`, which stores it in the `client_logs` table for 14 days.
+- Every scan emits one `[SCAN]` entry. It holds the trace id, per-stage ms (`capture`, `decode`, `det`, `liveness`, `rec`, `match`, `enqueue`), detector box and landmarks, liveness score and logits, top-2 gallery matches with margin, and the outcome.
+- Every HTTP call emits one `[API]` entry with its status and duration, or the error code on failure (`ECONNABORTED` means a timeout, for example during a Render cold start).
+- `[SYNC]` entries cover push and pull counts. `[CRASH]` entries cover JS exceptions, unhandled promise rejections and render crashes.
+- Query uploaded logs (admin JWT): `GET /api/client-logs?device_id=&tag=SCAN&level=&trace_id=&since=&limit=`.
+
+**Debug dump:** kiosk → ℹ️ AI Info → "🐞 Debug dump". Each scan then saves `frame.jpg`, `det_input_640.bmp`, `liveness_input_80.bmp`, `rec_input_112.bmp` and `trace.json`. The BMPs are the exact model inputs.
+
+**PC-side tool:**
+```powershell
+.\read_phone_logs.ps1                 # live stream, saved to logs\phone_<time>.log
+.\read_phone_logs.ps1 -Tag SCAN       # only one logger tag
+.\read_phone_logs.ps1 -Crash          # include native ONNX Runtime / JNI crashes
+.\read_phone_logs.ps1 -Pull           # copy debug dumps to logs\debug\ (dev-client builds only)
+```
+
+**Field fixes without reinstalling:** installed builds carry an EAS Update channel (`development` / `preview` / `production`). JS-only fixes can be shipped with `npx eas update --channel preview`, and the app picks them up on its next launch.
 
 ---
 

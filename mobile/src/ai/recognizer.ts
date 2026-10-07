@@ -18,6 +18,10 @@ export class ArcFaceRecognizer {
   private session: any;
   private readonly inputSize = 112;
 
+  /** Last aligned model input and alignment path, kept for debug dumps and scan traces. */
+  public lastInputTensor: Float32Array | null = null;
+  public lastAlignMode: 'umeyama' | 'bbox_crop' | null = null;
+
   constructor(session: any) {
     this.session = session;
   }
@@ -244,6 +248,8 @@ export class ArcFaceRecognizer {
       // No landmarks available — use axis-aligned bounding box crop
       inputTensor = this.cropAndPreprocess(frame, bbox);
     }
+    this.lastInputTensor = inputTensor;
+    this.lastAlignMode = landmarks && landmarks.length === 5 ? 'umeyama' : 'bbox_crop';
 
     const inputName = this.session.inputNames ? this.session.inputNames[0] : 'data';
 

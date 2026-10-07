@@ -1,15 +1,23 @@
 """FastAPI application entry point."""
 
 import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.ai.pipeline import AttendancePipeline
-from app.api import attendance, auth, checkin, employees, registration, settings as settings_api, users
+from app.api import attendance, auth, checkin, client_logs, employees, registration, settings as settings_api, users
 
+# Without this, app-level logger.info() output is dropped under uvicorn (root logger defaults to WARNING)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 logger = logging.getLogger(__name__)
+request_logger = logging.getLogger("app.request")
 
 pipeline = AttendancePipeline()
 
@@ -119,6 +127,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """One log line per request (id, method, path, status, duration) so Render logs line up with device traces."""
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        request_logger.exception("rid=%s %s %s -> EXCEPTION %.0fms", request_id, request.method, request.url.path, elapsed_ms)
+        raise
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    if request.url.path not in ("/health", "/favicon.ico"):
+        request_logger.info(
+            "rid=%s %s %s -> %d %.0fms", request_id, request.method, request.url.path, response.status_code, elapsed_ms
+        )
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
 # Mount routers
 app.include_router(checkin.router, prefix="/api")
 app.include_router(employees.router, prefix="/api")
@@ -128,6 +157,7 @@ app.include_router(registration.router)  # Also serves / and /register directly
 app.include_router(attendance.router, prefix="/api")
 app.include_router(settings_api.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
+app.include_router(client_logs.router, prefix="/api")
 
 
 @app.get("/favicon.ico", include_in_schema=False)
